@@ -15,6 +15,7 @@ Aplicacion de escritorio y linea de comandos para registrar ingresos y gastos pe
 - [Archivos generados](#archivos-generados)
 - [Build de ejecutables](#build-de-ejecutables)
 - [Estado del proyecto](#estado-del-proyecto)
+- [Licencia](#licencia)
 - [Contribucion](#contribucion)
 
 ## Resumen
@@ -218,6 +219,10 @@ Salida esperada:
 - El repositorio incluye estructura para pruebas (`tests/`), pero actualmente no hay tests implementados.
 - No hay pipeline CI/CD incluido en el repo en este momento.
 
+## Licencia
+
+Este proyecto se distribuye bajo la licencia Apache-2.0. Consulta [LICENSE](LICENSE).
+
 ## Contribucion
 
 Sugerencias para colaborar:
@@ -226,5 +231,3 @@ Sugerencias para colaborar:
 2. Mantener compatibilidad de comandos CLI existentes.
 3. Agregar pruebas para nuevas funciones en capa de datos, CLI y exportadores.
 4. Documentar cambios de comportamiento en este README.
-
-Si usas este proyecto como base publica, se recomienda agregar archivo de licencia (`LICENSE`) antes de distribuir.
