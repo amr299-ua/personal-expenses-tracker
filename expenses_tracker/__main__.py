@@ -9,4 +9,4 @@ if __name__ == "__main__":
         sys.argv.pop(1)
         raise SystemExit(cli_main())
 
-    raise SystemExit(gui_main())
+    raise SystemExit(gui_main(sys.argv[1:]))

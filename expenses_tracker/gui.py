@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import calendar
 from datetime import date, timedelta
 import json
@@ -8,75 +9,120 @@ import tkinter as tk
 from tkinter import messagebox, ttk
 from typing import Any, Callable
 
-from expenses_tracker.charts import generate_charts
+import ttkbootstrap as ttkb
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
+from matplotlib.figure import Figure
+
+from expenses_tracker.automation import ReportScheduler
+from expenses_tracker.automation_dialog import AutomationDialog
+from expenses_tracker.chart_viewer import ChartViewerDialog
+from expenses_tracker.charts import generate_charts, generate_budget_chart, get_palette, PALETTES
 from expenses_tracker.db import ExpenseDatabase, TransactionInput
-from expenses_tracker.exporters import export_reports
+from expenses_tracker.exporters import (
+    export_reports,
+    _compute_category_rows_from_transactions,
+    _compute_month_rows_from_transactions,
+)
+from expenses_tracker.i18n import language_label, list_languages, month_name, normalize_language, tr
+from expenses_tracker.security import apply_private_permissions
 
 
-MONTH_NAMES_ES = [
-    "",
-    "Enero",
-    "Febrero",
-    "Marzo",
-    "Abril",
-    "Mayo",
-    "Junio",
-    "Julio",
-    "Agosto",
-    "Septiembre",
-    "Octubre",
-    "Noviembre",
-    "Diciembre",
+INCOME_CATEGORY_KEYS = [
+    "salary",
+    "business_income",
+    "freelance",
+    "interest",
+    "dividends",
+    "sale",
+    "refund",
+    "gift",
+    "extra_income",
+    "investment",
+    "other",
 ]
 
-TYPE_UI_TO_DB = {"Ingreso": "income", "Gasto": "expense"}
-TYPE_DB_TO_UI = {"income": "Ingreso", "expense": "Gasto"}
-FILTER_TYPE_TO_DB = {"Todos": "", "Ingresos": "income", "Gastos": "expense"}
-
-CATEGORIES_BY_TYPE = {
-    "Ingreso": [
-        "Salario",
-        "Ingresos por negocio",
-        "Freelance",
-        "Intereses",
-        "Dividendos",
-        "Venta",
-        "Reembolso",
-        "Regalo",
-        "Entrada extra",
-        "Inversion",
-        "Otros",
-    ],
-    "Gasto": [
-        "Comida",
-        "Luz",
-        "Agua",
-        "Gas",
-        "Transporte",
-        "Alquiler",
-        "Internet",
-        "Telefonia",
-        "Salud",
-        "Educacion",
-        "Ocio",
-        "Impuestos",
-        "Hogar",
-        "Mascotas",
-        "Suscripciones",
-        "Inversion",
-        "Otros",
-    ],
-}
-
-CHART_TYPE_OPTIONS = [
-    ("Todas (recomendado)", "all"),
-    ("Barras por categoria", "bar"),
-    ("Linea mensual", "line"),
-    ("Pastel (queso)", "pie"),
-    ("Puntos mensual", "scatter"),
-    ("Barras 3D mensual", "bar3d"),
+EXPENSE_CATEGORY_KEYS = [
+    "food",
+    "electricity",
+    "water",
+    "gas",
+    "transport",
+    "rent",
+    "internet",
+    "phone",
+    "health",
+    "education",
+    "leisure",
+    "taxes",
+    "home",
+    "pets",
+    "subscriptions",
+    "investment",
+    "other",
 ]
-CHART_LABEL_TO_KIND = {label: kind for label, kind in CHART_TYPE_OPTIONS}
+
+
+def category_options_for_type(language: str, type_key: str) -> list[str]:
+    keys = INCOME_CATEGORY_KEYS if type_key == "income" else EXPENSE_CATEGORY_KEYS
+    return [tr(language, f"category_{key}") for key in keys]
+
+
+def filter_transaction_rows(
+    rows: list[dict[str, object]],
+    search: str,
+    selected_type_db: str,
+    selected_category: str,
+    all_label: str,
+    date_from: date | None,
+    date_to: date | None,
+    type_db_to_display: dict[str, str],
+) -> list[dict[str, object]]:
+    normalized_search = search.strip().lower()
+    normalized_category = selected_category.strip().lower()
+    normalized_all_label = all_label.strip().lower()
+
+    filtered: list[dict[str, object]] = []
+    for row in rows:
+        row_type = str(row["transaction_type"]).lower()
+        row_category = str(row["category"]).lower()
+        row_date = safe_parse_date(str(row["transaction_date"]))
+
+        if selected_type_db and row_type != selected_type_db:
+            continue
+        if normalized_category != normalized_all_label and row_category != normalized_category:
+            continue
+        if date_from and row_date and row_date < date_from:
+            continue
+        if date_to and row_date and row_date > date_to:
+            continue
+
+        if normalized_search:
+            searchable = " ".join(
+                [
+                    str(row["id"]),
+                    str(row["transaction_date"]),
+                    type_db_to_display.get(str(row["transaction_type"]), str(row["transaction_type"])),
+                    str(row["category"]),
+                    str(row["amount"]),
+                    str(row["description"]),
+                ]
+            ).lower()
+            if normalized_search not in searchable:
+                continue
+
+        filtered.append(row)
+
+    return filtered
+
+
+def safe_parse_date(raw_value: str) -> date | None:
+    value = raw_value.strip()
+    if not value:
+        return None
+    try:
+        return date.fromisoformat(value)
+    except ValueError:
+        return None
 
 
 class CalendarDialog(tk.Toplevel):
@@ -85,9 +131,11 @@ class CalendarDialog(tk.Toplevel):
         parent: tk.Misc,
         initial_date: date,
         on_select: Callable[[date], None],
-        title: str = "Seleccionar fecha",
+        language: str,
+        title: str,
     ) -> None:
         super().__init__(parent)
+        self._language = normalize_language(language)
         self.title(title)
         self.resizable(False, False)
         self.transient(parent)
@@ -105,18 +153,28 @@ class CalendarDialog(tk.Toplevel):
         controls = ttk.Frame(shell)
         controls.pack(fill="x", pady=(0, 8))
 
-        ttk.Button(controls, text="<", width=3, command=self._prev_month).pack(side="left")
+        ttk.Button(
+            controls,
+            text=tr(self._language, "btn_previous"),
+            width=3,
+            command=self._prev_month,
+        ).pack(side="left")
         self.month_label = ttk.Label(controls, anchor="center", font=("TkDefaultFont", 10, "bold"))
         self.month_label.pack(side="left", fill="x", expand=True)
-        ttk.Button(controls, text=">", width=3, command=self._next_month).pack(side="right")
+        ttk.Button(
+            controls,
+            text=tr(self._language, "btn_next"),
+            width=3,
+            command=self._next_month,
+        ).pack(side="right")
 
         self.days_frame = ttk.Frame(shell)
         self.days_frame.pack(fill="both", expand=True)
 
         footer = ttk.Frame(shell)
         footer.pack(fill="x", pady=(8, 0))
-        ttk.Button(footer, text="Hoy", command=self._select_today).pack(side="left")
-        ttk.Button(footer, text="Cerrar", command=self.destroy).pack(side="right")
+        ttk.Button(footer, text=tr(self._language, "btn_today"), command=self._select_today).pack(side="left")
+        ttk.Button(footer, text=tr(self._language, "btn_close"), command=self.destroy).pack(side="right")
 
         self._render()
 
@@ -124,9 +182,17 @@ class CalendarDialog(tk.Toplevel):
         for widget in self.days_frame.winfo_children():
             widget.destroy()
 
-        self.month_label.config(text=f"{MONTH_NAMES_ES[self._shown_month]} {self._shown_year}")
+        self.month_label.config(text=f"{month_name(self._language, self._shown_month)} {self._shown_year}")
 
-        weekdays = ["Lu", "Ma", "Mi", "Ju", "Vi", "Sa", "Do"]
+        weekdays = [
+            tr(self._language, "weekday_mon"),
+            tr(self._language, "weekday_tue"),
+            tr(self._language, "weekday_wed"),
+            tr(self._language, "weekday_thu"),
+            tr(self._language, "weekday_fri"),
+            tr(self._language, "weekday_sat"),
+            tr(self._language, "weekday_sun"),
+        ]
         for column, short_name in enumerate(weekdays):
             ttk.Label(self.days_frame, text=short_name, anchor="center").grid(
                 row=0,
@@ -176,26 +242,28 @@ class CalendarDialog(tk.Toplevel):
 
 
 class ChartTypeDialog(tk.Toplevel):
-    def __init__(self, parent: tk.Misc) -> None:
+    def __init__(self, parent: tk.Misc, language: str, options: list[tuple[str, str]]) -> None:
         super().__init__(parent)
-        self.title("Selecciona el tipo de grafica")
+        self._language = normalize_language(language)
+        self.title(tr(self._language, "dialog_chart_title"))
         self.resizable(False, False)
         self.transient(parent)
         self.grab_set()
 
         self.selected_kind: str | None = None
+        self._label_to_kind = {label: kind for label, kind in options}
 
         frame = ttk.Frame(self, padding=12)
         frame.pack(fill="both", expand=True)
 
-        ttk.Label(frame, text="Elige el tipo de grafica a generar:").pack(anchor="w", pady=(0, 6))
+        ttk.Label(frame, text=tr(self._language, "dialog_chart_prompt")).pack(anchor="w", pady=(0, 6))
 
-        default_label = CHART_TYPE_OPTIONS[0][0]
+        default_label = options[0][0]
         self.chart_type_label_var = tk.StringVar(value=default_label)
         chart_box = ttk.Combobox(
             frame,
             textvariable=self.chart_type_label_var,
-            values=[label for label, _kind in CHART_TYPE_OPTIONS],
+            values=[label for label, _kind in options],
             state="readonly",
             width=30,
         )
@@ -203,10 +271,12 @@ class ChartTypeDialog(tk.Toplevel):
 
         button_row = ttk.Frame(frame)
         button_row.pack(fill="x", pady=(10, 0))
-        ttk.Button(button_row, text="Cancelar", style="Ghost.TButton", command=self._cancel).pack(
+        ttk.Button(button_row, text=tr(self._language, "btn_cancel"), style="Ghost.TButton", command=self._cancel).pack(
             side="right", padx=(6, 0)
         )
-        ttk.Button(button_row, text="Generar", style="Accent.TButton", command=self._accept).pack(side="right")
+        ttk.Button(button_row, text=tr(self._language, "btn_generate"), style="Accent.TButton", command=self._accept).pack(
+            side="right"
+        )
 
         self.bind("<Return>", lambda _event: self._accept())
         self.bind("<Escape>", lambda _event: self._cancel())
@@ -215,7 +285,7 @@ class ChartTypeDialog(tk.Toplevel):
 
     def _accept(self) -> None:
         label = self.chart_type_label_var.get().strip()
-        self.selected_kind = CHART_LABEL_TO_KIND.get(label)
+        self.selected_kind = self._label_to_kind.get(label)
         self.destroy()
 
     def _cancel(self) -> None:
@@ -224,170 +294,318 @@ class ChartTypeDialog(tk.Toplevel):
 
 
 class ExpensesApp(tk.Tk):
-    def __init__(self, db_path: str = "data/expenses.db") -> None:
+    def __init__(self, db_path: str = "data/expenses.db", initial_language: str | None = None) -> None:
         super().__init__()
-        self.title("Control de gastos personal")
+
+        self.state_file = Path("data/ui_state.json")
+        self._state = self._read_ui_state()
+        self.language = normalize_language(initial_language or str(self._state.get("language", "en")))
+
         self.geometry("1100x720")
         self.minsize(960, 640)
         self.protocol("WM_DELETE_WINDOW", self._on_close)
 
-        self.state_file = Path("data/ui_state.json")
-        self._state = self._read_ui_state()
         saved_mode = str(self._state.get("theme_mode", "light"))
         self.theme_mode = saved_mode if saved_mode in {"light", "dark"} else "light"
-        self._colors = self._build_palette(self.theme_mode)
+        self.palette = str(self._state.get("palette", "default"))
+        if self.palette not in PALETTES:
+            self.palette = "default"
         self._setup_theme()
 
         self.database = ExpenseDatabase(db_path)
         self.database.initialize()
 
+        self.scheduler = ReportScheduler(
+            database=self.database,
+            config_getter=self.database.get_automation_config,
+            language=self.language,
+        )
+        self.scheduler.start()
+        self.scheduler.update_schedule()
+
         self.search_var = tk.StringVar(value=str(self._state.get("search", "")))
-        self.filter_type_var = tk.StringVar(
-            value=self._normalize_filter_type(str(self._state.get("filter_type", "Todos")))
-        )
-        self.filter_category_var = tk.StringVar(
-            value=self._normalize_filter_category(str(self._state.get("filter_category", "Todas")))
-        )
+        self.filter_type_key = self._normalize_filter_type_key(str(self._state.get("filter_type_key", "all")))
+        self.filter_category_var = tk.StringVar(value=str(self._state.get("filter_category", "")))
         self.filter_from_var = tk.StringVar(value=str(self._state.get("filter_from", "")))
         self.filter_to_var = tk.StringVar(value=str(self._state.get("filter_to", "")))
-        self.filtered_count_var = tk.StringVar(value="Mostrando: 0")
+        self.filtered_count_var = tk.StringVar(value=tr(self.language, "showing_rows", filtered=0, total=0))
 
         self.sort_column = str(self._state.get("sort_column", "date"))
         self.sort_desc = bool(self._state.get("sort_desc", True))
-        self._column_titles = {
-            "id": "ID",
-            "date": "Fecha",
-            "type": "Tipo",
-            "category": "Categoria",
-            "amount": "Monto",
-            "description": "Descripcion",
-        }
 
+        self.register_type_key = self._normalize_register_type_key(str(self._state.get("register_type_key", "expense")))
+        self.type_var = tk.StringVar()
+        self.amount_var = tk.StringVar()
+        self.category_var = tk.StringVar()
+        self.date_var = tk.StringVar(value=date.today().isoformat())
+        self.editing_transaction_id: int | None = None
+        self.save_button_var = tk.StringVar()
+
+        # Pagination state
+        self._page_size = 100
+        self._current_page = 0
+        self._total_pages = 1
+
+        # Embedded chart canvases
+        self._chart_canvas_category: FigureCanvasTkAgg | None = None
+        self._chart_canvas_month: FigureCanvasTkAgg | None = None
+        self._chart_toolbar_category: NavigationToolbar2Tk | None = None
+        self._chart_toolbar_month: NavigationToolbar2Tk | None = None
+
+        # Chart series visibility toggles
+        self._show_income = tk.BooleanVar(value=True)
+        self._show_expense = tk.BooleanVar(value=True)
+        self._show_balance = tk.BooleanVar(value=True)
+
+        # Validation indicator labels
+        self._amount_indicator: ttk.Label | None = None
+        self._date_indicator: ttk.Label | None = None
+        self._category_indicator: ttk.Label | None = None
+
+        self.balance_var = tk.StringVar(value=tr(self.language, "balance_label", amount=0.0))
+        self.income_var = tk.StringVar(value=tr(self.language, "income_total_label", amount=0.0))
+        self.expense_var = tk.StringVar(value=tr(self.language, "expense_total_label", amount=0.0))
+        self.filter_type_var = tk.StringVar()
+        self.language_var = tk.StringVar()
+        self._last_totals = {"balance": 0.0, "income": 0.0, "expense": 0.0}
+
+        self._container: ttk.Frame | None = None
+        self._notebook: ttk.Notebook | None = None
+        self._tab_register: ttk.Frame | None = None
+        self._sync_language_maps()
         self._build_ui()
+        self._setup_shortcuts()
         self._refresh_all()
 
-    def _build_ui(self) -> None:
-        container = ttk.Frame(self, padding=16, style="App.TFrame")
-        container.pack(fill="both", expand=True)
+    def _sync_language_maps(self) -> None:
+        self._language_display_to_code = {language_label(code): code for code, _name in list_languages()}
+        self._type_display_to_db = {
+            tr(self.language, "type_income"): "income",
+            tr(self.language, "type_expense"): "expense",
+        }
+        self._type_db_to_display = {value: key for key, value in self._type_display_to_db.items()}
 
-        header = ttk.Frame(container, padding=14, style="Header.TFrame")
+        self._filter_display_to_key = {
+            tr(self.language, "type_all"): "all",
+            tr(self.language, "type_income_plural"): "income",
+            tr(self.language, "type_expense_plural"): "expense",
+        }
+        self._filter_key_to_display = {value: key for key, value in self._filter_display_to_key.items()}
+        self._all_label = tr(self.language, "type_all")
+
+        self._column_titles = {
+            "id": tr(self.language, "col_id"),
+            "date": tr(self.language, "col_date"),
+            "type": tr(self.language, "col_type"),
+            "category": tr(self.language, "col_category"),
+            "amount": tr(self.language, "col_amount"),
+            "description": tr(self.language, "col_description"),
+        }
+
+        self.language_var.set(language_label(self.language))
+        self.type_var.set(self._type_db_to_display.get(self.register_type_key, tr(self.language, "type_expense")))
+        self.filter_type_var.set(self._filter_key_to_display.get(self.filter_type_key, self._all_label))
+        self.balance_var.set(tr(self.language, "balance_label", amount=self._last_totals["balance"]))
+        self.income_var.set(tr(self.language, "income_total_label", amount=self._last_totals["income"]))
+        self.expense_var.set(tr(self.language, "expense_total_label", amount=self._last_totals["expense"]))
+        self._update_save_button_text()
+
+    def _chart_type_options(self) -> list[tuple[str, str]]:
+        return [
+            (tr(self.language, "chart_option_all"), "all"),
+            (tr(self.language, "chart_option_bar"), "bar"),
+            (tr(self.language, "chart_option_line"), "line"),
+            (tr(self.language, "chart_option_pie"), "pie"),
+            (tr(self.language, "chart_option_scatter"), "scatter"),
+            (tr(self.language, "chart_option_bar3d"), "bar3d"),
+            (tr(self.language, "chart_option_forecast"), "forecast"),
+            (tr(self.language, "chart_option_sankey"), "sankey"),
+            (tr(self.language, "chart_option_budget"), "budget"),
+        ]
+
+    def _build_ui(self) -> None:
+        if self._container is not None:
+            self._container.destroy()
+
+        self.title(tr(self.language, "app_title"))
+        self._container = ttk.Frame(self, padding=16, style="App.TFrame")
+        self._container.pack(fill="both", expand=True)
+
+        header = ttk.Frame(self._container, padding=14, style="Header.TFrame")
         header.pack(fill="x", pady=(0, 8))
 
         heading = ttk.Frame(header, style="Header.TFrame")
         heading.pack(side="left", fill="x", expand=True)
 
-        title_label = ttk.Label(heading, text="Panel de finanzas", style="HeaderTitle.TLabel")
-        title_label.pack(anchor="w")
-        subtitle_label = ttk.Label(
+        ttk.Label(heading, text=tr(self.language, "header_title"), style="HeaderTitle.TLabel").pack(anchor="w")
+        ttk.Label(
             heading,
-            text="Controla movimientos, filtra datos y genera reportes visuales.",
+            text=tr(self.language, "header_subtitle"),
             style="HeaderSubtitle.TLabel",
-        )
-        subtitle_label.pack(anchor="w", pady=(2, 0))
+        ).pack(anchor="w", pady=(2, 0))
 
         buttons = ttk.Frame(header, style="Header.TFrame")
         buttons.pack(side="right")
+
+        ttk.Label(buttons, text=tr(self.language, "label_language"), style="HeaderSubtitle.TLabel").pack(
+            side="left", padx=(0, 6)
+        )
+        language_box = ttk.Combobox(
+            buttons,
+            textvariable=self.language_var,
+            values=list(self._language_display_to_code.keys()),
+            state="readonly",
+            width=16,
+        )
+        language_box.pack(side="left", padx=3)
+        language_box.bind("<<ComboboxSelected>>", lambda _event: self._on_language_change())
 
         self.theme_button = ttk.Button(buttons, style="Ghost.TButton", command=self._toggle_theme)
         self.theme_button.pack(side="left", padx=3)
         self._update_theme_button_text()
 
-        ttk.Button(buttons, text="Refrescar", style="Ghost.TButton", command=self._refresh_all).pack(
-            side="left", padx=3
+        self.palette_var = tk.StringVar(value=self.palette)
+        palette_box = ttk.Combobox(
+            buttons,
+            textvariable=self.palette_var,
+            values=list(PALETTES.keys()),
+            state="readonly",
+            width=12,
         )
-        ttk.Button(buttons, text="Sacar graficas", style="Ghost.TButton", command=self._generate_charts).pack(
+        palette_box.pack(side="left", padx=3)
+        palette_box.bind("<<ComboboxSelected>>", lambda _event: self._on_palette_change())
+
+        ttk.Button(buttons, text=tr(self.language, "btn_refresh"), style="Ghost.TButton", command=self._refresh_all).pack(
             side="left", padx=3
         )
         ttk.Button(
             buttons,
-            text="Exportar Excel",
+            text=tr(self.language, "btn_make_charts"),
             style="Ghost.TButton",
-            command=lambda: self._export("excel"),
+            command=self._generate_charts,
         ).pack(side="left", padx=3)
         ttk.Button(
             buttons,
-            text="Exportar PDF",
+            text=tr(self.language, "btn_automation"),
             style="Ghost.TButton",
-            command=lambda: self._export("pdf"),
+            command=self._open_automation_dialog,
+        ).pack(side="left", padx=3)
+        self.export_format_var = tk.StringVar(value="excel")
+        export_format_box = ttk.Combobox(
+            buttons,
+            textvariable=self.export_format_var,
+            values=["excel", "csv", "pdf", "json", "yaml", "html", "monthly_pdf", "all"],
+            state="readonly",
+            width=12,
+        )
+        export_format_box.pack(side="left", padx=3)
+        ttk.Button(
+            buttons,
+            text=tr(self.language, "btn_export"),
+            style="Ghost.TButton",
+            command=lambda: self._export(self.export_format_var.get()),
         ).pack(side="left", padx=3)
         ttk.Button(
             buttons,
-            text="Exportar Todo",
+            text=tr(self.language, "btn_quick_export"),
             style="Accent.TButton",
-            command=lambda: self._export("all"),
+            command=self._quick_export,
         ).pack(side="left", padx=3)
 
-        self.balance_var = tk.StringVar(value="Balance actual: 0.00")
-        balance_card = ttk.Frame(container, style="Card.TFrame", padding=(14, 10))
-        balance_card.pack(fill="x", pady=(0, 8))
-        balance_label = ttk.Label(balance_card, textvariable=self.balance_var, style="Metric.TLabel")
-        balance_label.pack(anchor="w")
+        metrics_row = ttk.Frame(self._container, style="App.TFrame")
+        metrics_row.pack(fill="x", pady=(0, 8))
+        self.balance_label = self._build_metric_card(metrics_row, self.balance_var, padx=(0, 6))
+        self.income_label = self._build_metric_card(metrics_row, self.income_var, padx=(0, 6))
+        self.expense_label = self._build_metric_card(metrics_row, self.expense_var, padx=(0, 0))
 
-        notebook_shell = ttk.Frame(container, style="Card.TFrame", padding=6)
+        notebook_shell = ttk.Frame(self._container, style="Card.TFrame", padding=6)
         notebook_shell.pack(fill="both", expand=True)
 
         notebook = ttk.Notebook(notebook_shell)
         notebook.pack(fill="both", expand=True)
+        self._notebook = notebook
 
         tab_register = ttk.Frame(notebook, padding=12, style="App.TFrame")
         tab_transactions = ttk.Frame(notebook, padding=12, style="App.TFrame")
         tab_stats = ttk.Frame(notebook, padding=12, style="App.TFrame")
 
-        notebook.add(tab_register, text="Registrar")
-        notebook.add(tab_transactions, text="Movimientos")
-        notebook.add(tab_stats, text="Estadisticas")
+        notebook.add(tab_register, text=tr(self.language, "tab_register"))
+        notebook.add(tab_transactions, text=tr(self.language, "tab_transactions"))
+        notebook.add(tab_stats, text=tr(self.language, "tab_stats"))
+        self._tab_register = tab_register
 
         self._build_register_tab(tab_register)
         self._build_transactions_tab(tab_transactions)
         self._build_stats_tab(tab_stats)
 
+    def _build_metric_card(
+        self,
+        parent: ttk.Frame,
+        text_var: tk.StringVar,
+        padx: tuple[int, int],
+    ) -> ttk.Label:
+        card = ttk.Frame(parent, style="Card.TFrame", padding=(14, 10))
+        card.pack(side="left", fill="x", expand=True, padx=padx)
+        label = ttk.Label(card, textvariable=text_var, style="Metric.TLabel")
+        label.pack(anchor="w")
+        return label
+
     def _build_register_tab(self, parent: ttk.Frame) -> None:
         form = ttk.Frame(parent, style="Card.TFrame", padding=12)
         form.pack(fill="x", padx=8, pady=6)
 
-        ttk.Label(form, text="Tipo").grid(row=0, column=0, sticky="w", pady=4)
-        ttk.Label(form, text="Monto").grid(row=0, column=1, sticky="w", pady=4)
-        ttk.Label(form, text="Categoria").grid(row=0, column=2, sticky="w", pady=4)
-        ttk.Label(form, text="Fecha (YYYY-MM-DD)").grid(row=0, column=3, sticky="w", pady=4)
-
-        self.type_var = tk.StringVar(value="Gasto")
-        self.amount_var = tk.StringVar()
-        self.category_var = tk.StringVar()
-        self.date_var = tk.StringVar(value=date.today().isoformat())
+        ttk.Label(form, text=tr(self.language, "label_type")).grid(row=0, column=0, sticky="w", pady=4)
+        ttk.Label(form, text=tr(self.language, "label_amount")).grid(row=0, column=1, sticky="w", pady=4)
+        ttk.Label(form, text=tr(self.language, "label_category")).grid(row=0, column=2, sticky="w", pady=4)
+        ttk.Label(form, text=tr(self.language, "label_date")).grid(row=0, column=3, sticky="w", pady=4)
 
         type_box = ttk.Combobox(
             form,
             textvariable=self.type_var,
-            values=["Ingreso", "Gasto"],
+            values=list(self._type_display_to_db.keys()),
             state="readonly",
             width=12,
         )
-        type_box.grid(row=1, column=0, sticky="we", padx=(0, 10), pady=(0, 8))
+        type_box.grid(row=1, column=0, sticky="we", padx=(0, 10), pady=(0, 2))
         type_box.bind("<<ComboboxSelected>>", lambda _event: self._on_register_type_changed())
 
-        ttk.Entry(form, textvariable=self.amount_var, width=16).grid(
-            row=1, column=1, sticky="we", padx=(0, 10), pady=(0, 8)
-        )
+        amount_field = ttk.Frame(form)
+        amount_field.grid(row=1, column=1, sticky="we", padx=(0, 10), pady=(0, 2))
+        self.amount_entry = ttk.Entry(amount_field, textvariable=self.amount_var, width=16)
+        self.amount_entry.pack(side="left", fill="x", expand=True)
+        self._amount_indicator = ttk.Label(amount_field, text="", width=2)
+        self._amount_indicator.pack(side="left", padx=(4, 0))
+
+        cat_field = ttk.Frame(form)
+        cat_field.grid(row=1, column=2, sticky="we", padx=(0, 10), pady=(0, 2))
         self.category_box = ttk.Combobox(
-            form,
+            cat_field,
             textvariable=self.category_var,
-            values=CATEGORIES_BY_TYPE[self.type_var.get()],
-            state="readonly",
+            values=[],
+            state="normal",
             width=20,
         )
-        self.category_box.grid(row=1, column=2, sticky="we", padx=(0, 10), pady=(0, 8))
-        self._on_register_type_changed()
+        self.category_box.pack(side="left", fill="x", expand=True)
+        self._category_indicator = ttk.Label(cat_field, text="", width=2)
+        self._category_indicator.pack(side="left", padx=(4, 0))
+
         date_field = ttk.Frame(form)
-        date_field.grid(row=1, column=3, sticky="we", padx=(0, 10), pady=(0, 8))
-        ttk.Entry(date_field, textvariable=self.date_var, width=18).pack(side="left", fill="x", expand=True)
+        date_field.grid(row=1, column=3, sticky="we", padx=(0, 10), pady=(0, 2))
+        self.date_entry = ttk.Entry(date_field, textvariable=self.date_var, width=18)
+        self.date_entry.pack(side="left", fill="x", expand=True)
+        self._date_indicator = ttk.Label(date_field, text="", width=2)
+        self._date_indicator.pack(side="left", padx=(4, 0))
         ttk.Button(
             date_field,
             text="...",
             width=3,
-            command=lambda: self._open_calendar_for_var(self.date_var, "Fecha del movimiento"),
+            command=lambda: self._open_calendar_for_var(
+                self.date_var,
+                tr(self.language, "dialog_select_date"),
+            ),
         ).pack(side="left", padx=(4, 0))
 
-        ttk.Label(form, text="Descripcion").grid(row=2, column=0, sticky="w", pady=4)
+        ttk.Label(form, text=tr(self.language, "label_description")).grid(row=2, column=0, sticky="w", pady=4)
         self.description_text = tk.Text(
             form,
             width=80,
@@ -396,6 +614,7 @@ class ExpensesApp(tk.Tk):
             borderwidth=1,
             background=self._colors["input_bg"],
             foreground=self._colors["text"],
+            insertbackground=self._colors["text"],
             highlightthickness=0,
             padx=8,
             pady=6,
@@ -405,25 +624,38 @@ class ExpensesApp(tk.Tk):
         actions = ttk.Frame(form, style="Card.TFrame")
         actions.grid(row=4, column=0, columnspan=4, sticky="e")
 
-        ttk.Button(actions, text="Guardar movimiento", style="Accent.TButton", command=self._add_transaction).pack(
-            side="left", padx=4
-        )
-        ttk.Button(actions, text="Limpiar", style="Ghost.TButton", command=self._clear_form).pack(
-            side="left", padx=4
-        )
+        ttk.Button(
+            actions,
+            textvariable=self.save_button_var,
+            style="Accent.TButton",
+            command=self._save_transaction,
+        ).pack(side="left", padx=4)
+        ttk.Button(
+            actions,
+            text=tr(self.language, "btn_clear"),
+            style="Ghost.TButton",
+            command=self._clear_form,
+        ).pack(side="left", padx=4)
 
         for column_index in range(4):
             form.columnconfigure(column_index, weight=1)
 
+        self._on_register_type_changed()
+        self._update_save_button_text()
+
+        self.amount_var.trace_add("write", self._validate_amount)
+        self.date_var.trace_add("write", self._validate_date)
+        self.category_var.trace_add("write", self._validate_category)
+
     def _build_transactions_tab(self, parent: ttk.Frame) -> None:
-        filters = ttk.LabelFrame(parent, text="Filtros", padding=10, style="Card.TLabelframe")
+        filters = ttk.LabelFrame(parent, text=tr(self.language, "filters_title"), padding=10, style="Card.TLabelframe")
         filters.pack(fill="x", padx=0, pady=(0, 8))
 
-        ttk.Label(filters, text="Buscar").grid(row=0, column=0, sticky="w")
-        ttk.Label(filters, text="Tipo").grid(row=0, column=1, sticky="w")
-        ttk.Label(filters, text="Categoria").grid(row=0, column=2, sticky="w")
-        ttk.Label(filters, text="Desde (YYYY-MM-DD)").grid(row=0, column=3, sticky="w")
-        ttk.Label(filters, text="Hasta (YYYY-MM-DD)").grid(row=0, column=4, sticky="w")
+        ttk.Label(filters, text=tr(self.language, "label_search")).grid(row=0, column=0, sticky="w")
+        ttk.Label(filters, text=tr(self.language, "label_type")).grid(row=0, column=1, sticky="w")
+        ttk.Label(filters, text=tr(self.language, "label_category")).grid(row=0, column=2, sticky="w")
+        ttk.Label(filters, text=tr(self.language, "label_from")).grid(row=0, column=3, sticky="w")
+        ttk.Label(filters, text=tr(self.language, "label_to")).grid(row=0, column=4, sticky="w")
 
         search_entry = ttk.Entry(filters, textvariable=self.search_var)
         search_entry.grid(row=1, column=0, sticky="we", padx=(0, 8), pady=(2, 0))
@@ -431,7 +663,7 @@ class ExpensesApp(tk.Tk):
         type_box = ttk.Combobox(
             filters,
             textvariable=self.filter_type_var,
-            values=["Todos", "Ingresos", "Gastos"],
+            values=list(self._filter_display_to_key.keys()),
             state="readonly",
             width=10,
         )
@@ -441,7 +673,7 @@ class ExpensesApp(tk.Tk):
         self.category_filter_box = ttk.Combobox(
             filters,
             textvariable=self.filter_category_var,
-            values=["Todas"],
+            values=[self._all_label],
             state="readonly",
             width=18,
         )
@@ -459,7 +691,7 @@ class ExpensesApp(tk.Tk):
             width=3,
             command=lambda: self._open_calendar_for_var(
                 self.filter_from_var,
-                "Fecha inicial",
+                tr(self.language, "label_from"),
                 on_change=self._on_filter_change,
             ),
         ).pack(side="left", padx=(4, 0))
@@ -475,72 +707,82 @@ class ExpensesApp(tk.Tk):
             width=3,
             command=lambda: self._open_calendar_for_var(
                 self.filter_to_var,
-                "Fecha final",
+                tr(self.language, "label_to"),
                 on_change=self._on_filter_change,
             ),
         ).pack(side="left", padx=(4, 0))
 
         filter_actions = ttk.Frame(filters, style="Card.TFrame")
         filter_actions.grid(row=1, column=5, sticky="e")
-        ttk.Button(filter_actions, text="Aplicar", style="Accent.TButton", command=self._load_transactions).pack(
-            side="left", padx=3
-        )
-        ttk.Button(filter_actions, text="Limpiar", style="Ghost.TButton", command=self._clear_filters).pack(
-            side="left", padx=3
-        )
+        ttk.Button(
+            filter_actions,
+            text=tr(self.language, "btn_apply"),
+            style="Accent.TButton",
+            command=self._load_transactions,
+        ).pack(side="left", padx=3)
+        ttk.Button(
+            filter_actions,
+            text=tr(self.language, "btn_clear"),
+            style="Ghost.TButton",
+            command=self._clear_filters,
+        ).pack(side="left", padx=3)
 
         quick_ranges = ttk.Frame(filters, style="Card.TFrame")
         quick_ranges.grid(row=2, column=0, columnspan=6, sticky="w", pady=(8, 0))
-        ttk.Label(quick_ranges, text="Atajos de fecha:").pack(side="left", padx=(0, 6))
+        ttk.Label(quick_ranges, text=tr(self.language, "label_quick_dates")).pack(side="left", padx=(0, 6))
         ttk.Button(
             quick_ranges,
-            text="Hoy",
+            text=tr(self.language, "btn_today"),
             style="Ghost.TButton",
             command=lambda: self._apply_date_preset("today"),
-        ).pack(
-            side="left", padx=2
-        )
+        ).pack(side="left", padx=2)
         ttk.Button(
             quick_ranges,
-            text="Semana",
+            text=tr(self.language, "btn_week"),
             style="Ghost.TButton",
             command=lambda: self._apply_date_preset("week"),
-        ).pack(
-            side="left", padx=2
-        )
+        ).pack(side="left", padx=2)
         ttk.Button(
             quick_ranges,
-            text="Mes",
+            text=tr(self.language, "btn_month"),
             style="Ghost.TButton",
             command=lambda: self._apply_date_preset("month"),
-        ).pack(
-            side="left", padx=2
-        )
+        ).pack(side="left", padx=2)
         ttk.Button(
             quick_ranges,
-            text="Año",
+            text=tr(self.language, "btn_year"),
             style="Ghost.TButton",
             command=lambda: self._apply_date_preset("year"),
-        ).pack(
-            side="left", padx=2
-        )
+        ).pack(side="left", padx=2)
         ttk.Button(
             quick_ranges,
-            text="Todo",
+            text=tr(self.language, "btn_all"),
             style="Ghost.TButton",
             command=lambda: self._apply_date_preset("all"),
-        ).pack(
-            side="left", padx=2
-        )
+        ).pack(side="left", padx=2)
 
         for column_index in range(5):
             filters.columnconfigure(column_index, weight=1)
 
         self.search_var.trace_add("write", self._on_search_change)
 
-        info_row = ttk.Frame(parent, style="App.TFrame")
-        info_row.pack(fill="x", pady=(0, 6))
-        ttk.Label(info_row, textvariable=self.filtered_count_var, style="Muted.TLabel").pack(side="right")
+        self.search_entry = search_entry
+
+        actions_row = ttk.Frame(parent, style="App.TFrame")
+        actions_row.pack(fill="x", pady=(0, 6))
+        ttk.Button(
+            actions_row,
+            text=tr(self.language, "btn_load_form"),
+            style="Ghost.TButton",
+            command=self._load_selected_into_form,
+        ).pack(side="left", padx=(0, 6))
+        ttk.Button(
+            actions_row,
+            text=tr(self.language, "btn_delete"),
+            style="Ghost.TButton",
+            command=self._delete_selected_transaction,
+        ).pack(side="left")
+        ttk.Label(actions_row, textvariable=self.filtered_count_var, style="Muted.TLabel").pack(side="right")
 
         tree_area = ttk.Frame(parent, style="Card.TFrame", padding=8)
         tree_area.pack(fill="both", expand=True)
@@ -563,139 +805,229 @@ class ExpensesApp(tk.Tk):
         self.transactions_tree.column("amount", width=100, anchor="e")
         self.transactions_tree.column("description", width=420, anchor="w")
 
+        self.transactions_tree.tag_configure("income", foreground=self._colors["positive"])
+        self.transactions_tree.tag_configure("expense", foreground=self._colors["negative"])
+        self.transactions_tree.bind("<Double-1>", lambda _event: self._load_selected_into_form())
+
         scrollbar = ttk.Scrollbar(tree_area, orient="vertical", command=self.transactions_tree.yview)
         scrollbar.pack(fill="y", side="right")
         self.transactions_tree.configure(yscrollcommand=scrollbar.set)
         self._refresh_sort_headers()
 
+        pagination = ttk.Frame(parent, style="App.TFrame")
+        pagination.pack(fill="x", pady=(6, 0))
+        self._btn_prev = ttk.Button(
+            pagination,
+            text="<",
+            width=3,
+            command=lambda: self._go_to_page(-1),
+        )
+        self._btn_prev.pack(side="left", padx=(0, 6))
+        self._page_label_var = tk.StringVar(value="1 / 1")
+        ttk.Label(pagination, textvariable=self._page_label_var, style="Muted.TLabel").pack(side="left")
+        self._btn_next = ttk.Button(
+            pagination,
+            text=">",
+            width=3,
+            command=lambda: self._go_to_page(1),
+        )
+        self._btn_next.pack(side="left", padx=(6, 0))
+
     def _build_stats_tab(self, parent: ttk.Frame) -> None:
         top = ttk.Frame(parent, style="App.TFrame")
         top.pack(fill="both", expand=True)
 
-        left = ttk.LabelFrame(top, text="Por categoria", padding=8, style="Card.TLabelframe")
-        right = ttk.LabelFrame(top, text="Por mes", padding=8, style="Card.TLabelframe")
+        left = ttk.Frame(top, style="App.TFrame")
+        right = ttk.Frame(top, style="App.TFrame")
         left.pack(fill="both", expand=True, side="left", padx=(0, 5))
         right.pack(fill="both", expand=True, side="left", padx=(5, 0))
 
+        left_tree = ttk.LabelFrame(left, text=tr(self.language, "group_by_category"), padding=8, style="Card.TLabelframe")
+        left_tree.pack(fill="both", expand=False, side="top", pady=(0, 5))
+
         self.category_tree = ttk.Treeview(
-            left,
+            left_tree,
             columns=("category", "income", "expense", "balance"),
             show="headings",
-            height=14,
+            height=6,
         )
         self.category_tree.pack(fill="both", expand=True, side="left")
 
-        self.category_tree.heading("category", text="Categoria")
-        self.category_tree.heading("income", text="Ingresos")
-        self.category_tree.heading("expense", text="Gastos")
-        self.category_tree.heading("balance", text="Balance")
+        self.category_tree.heading("category", text=tr(self.language, "col_category"))
+        self.category_tree.heading("income", text=tr(self.language, "legend_income"))
+        self.category_tree.heading("expense", text=tr(self.language, "legend_expense"))
+        self.category_tree.heading("balance", text=tr(self.language, "legend_balance"))
 
         self.category_tree.column("category", width=160, anchor="w")
         self.category_tree.column("income", width=100, anchor="e")
         self.category_tree.column("expense", width=100, anchor="e")
         self.category_tree.column("balance", width=100, anchor="e")
 
-        cat_scroll = ttk.Scrollbar(left, orient="vertical", command=self.category_tree.yview)
+        cat_scroll = ttk.Scrollbar(left_tree, orient="vertical", command=self.category_tree.yview)
         cat_scroll.pack(fill="y", side="right")
         self.category_tree.configure(yscrollcommand=cat_scroll.set)
 
+        left_chart = ttk.LabelFrame(left, text=tr(self.language, "chart_title_category"), padding=8, style="Card.TLabelframe")
+        left_chart.pack(fill="both", expand=True, side="top")
+        self._chart_frame_category = ttk.Frame(left_chart, style="Card.TFrame")
+        self._chart_frame_category.pack(fill="both", expand=True)
+
+        right_tree = ttk.LabelFrame(right, text=tr(self.language, "group_by_month"), padding=8, style="Card.TLabelframe")
+        right_tree.pack(fill="both", expand=False, side="top", pady=(0, 5))
+
         self.month_tree = ttk.Treeview(
-            right,
+            right_tree,
             columns=("month", "income", "expense", "balance"),
             show="headings",
-            height=14,
+            height=6,
         )
         self.month_tree.pack(fill="both", expand=True, side="left")
 
-        self.month_tree.heading("month", text="Mes")
-        self.month_tree.heading("income", text="Ingresos")
-        self.month_tree.heading("expense", text="Gastos")
-        self.month_tree.heading("balance", text="Balance")
+        self.month_tree.heading("month", text=tr(self.language, "chart_x_month"))
+        self.month_tree.heading("income", text=tr(self.language, "legend_income"))
+        self.month_tree.heading("expense", text=tr(self.language, "legend_expense"))
+        self.month_tree.heading("balance", text=tr(self.language, "legend_balance"))
 
         self.month_tree.column("month", width=120, anchor="center")
         self.month_tree.column("income", width=100, anchor="e")
         self.month_tree.column("expense", width=100, anchor="e")
         self.month_tree.column("balance", width=100, anchor="e")
 
-        month_scroll = ttk.Scrollbar(right, orient="vertical", command=self.month_tree.yview)
+        month_scroll = ttk.Scrollbar(right_tree, orient="vertical", command=self.month_tree.yview)
         month_scroll.pack(fill="y", side="right")
         self.month_tree.configure(yscrollcommand=month_scroll.set)
 
-    def _add_transaction(self) -> None:
-        try:
-            parsed_date = date.fromisoformat(self.date_var.get().strip())
-            amount = float(self.amount_var.get().strip())
-            db_type = TYPE_UI_TO_DB.get(self.type_var.get().strip())
-            if db_type is None:
-                raise ValueError("Selecciona un tipo valido (Ingreso o Gasto).")
+        series_toggles = ttk.Frame(right, style="App.TFrame")
+        series_toggles.pack(fill="x", pady=(4, 2))
+        ttk.Checkbutton(
+            series_toggles, text=tr(self.language, "legend_income"),
+            variable=self._show_income, command=self._update_charts,
+        ).pack(side="left", padx=(0, 8))
+        ttk.Checkbutton(
+            series_toggles, text=tr(self.language, "legend_expense"),
+            variable=self._show_expense, command=self._update_charts,
+        ).pack(side="left", padx=(0, 8))
+        ttk.Checkbutton(
+            series_toggles, text=tr(self.language, "legend_balance"),
+            variable=self._show_balance, command=self._update_charts,
+        ).pack(side="left", padx=(0, 8))
 
-            transaction = TransactionInput(
-                amount=amount,
-                transaction_type=db_type,
-                category=self.category_var.get().strip(),
-                transaction_date=parsed_date,
-                description=self.description_text.get("1.0", "end").strip(),
-            )
-            transaction_id = self.database.add_transaction(transaction)
+        right_chart = ttk.LabelFrame(right, text=tr(self.language, "chart_title_month"), padding=8, style="Card.TLabelframe")
+        right_chart.pack(fill="both", expand=True, side="top")
+        self._chart_frame_month = ttk.Frame(right_chart, style="Card.TFrame")
+        self._chart_frame_month.pack(fill="both", expand=True)
+
+    def _on_language_change(self) -> None:
+        selected_display = self.language_var.get().strip()
+        selected_code = self._language_display_to_code.get(selected_display, self.language)
+        if selected_code == self.language:
+            return
+
+        current_category = self.filter_category_var.get().strip()
+        current_was_all = current_category == self._all_label
+
+        self.language = selected_code
+        self._sync_language_maps()
+
+        if current_was_all:
+            self.filter_category_var.set(self._all_label)
+
+        self._build_ui()
+        self._refresh_all()
+        self._save_ui_state()
+
+    def _normalize_filter_type_key(self, value: str) -> str:
+        value_clean = value.strip().lower()
+        if value_clean in {"all", "income", "expense"}:
+            return value_clean
+        return "all"
+
+    def _normalize_register_type_key(self, value: str) -> str:
+        value_clean = value.strip().lower()
+        if value_clean in {"income", "expense"}:
+            return value_clean
+        return "expense"
+
+    def _category_options(self, type_key: str) -> list[str]:
+        return category_options_for_type(self.language, type_key)
+
+    def _on_register_type_changed(self) -> None:
+        display_value = self.type_var.get().strip()
+        self.register_type_key = self._type_display_to_db.get(display_value, "expense")
+        options = self._category_options(self.register_type_key)
+        self.category_box.configure(values=options)
+
+        if self.category_var.get() not in options:
+            self.category_var.set(options[0])
+
+    def _save_transaction(self) -> None:
+        try:
+            transaction = self._transaction_from_form()
+            if self.editing_transaction_id is None:
+                transaction_id = self.database.add_transaction(transaction, language=self.language)
+                success_message = tr(self.language, "success_saved", id=transaction_id)
+            else:
+                updated = self.database.update_transaction(
+                    self.editing_transaction_id,
+                    transaction,
+                    language=self.language,
+                )
+                if not updated:
+                    raise ValueError(tr(self.language, "update_not_found"))
+                success_message = tr(self.language, "success_updated", id=self.editing_transaction_id)
         except ValueError as error:
-            messagebox.showerror("Dato invalido", str(error), parent=self)
+            messagebox.showerror(tr(self.language, "error_invalid_data"), str(error), parent=self)
             return
         except Exception as error:
-            messagebox.showerror("Error", f"No se pudo guardar: {error}", parent=self)
+            messagebox.showerror(
+                tr(self.language, "error_generic"),
+                tr(self.language, "error_could_not_save", error=error),
+                parent=self,
+            )
             return
 
-        messagebox.showinfo("Exito", f"Movimiento guardado con ID {transaction_id}", parent=self)
+        messagebox.showinfo(tr(self.language, "success"), success_message, parent=self)
         self._clear_form(keep_date=True)
         self._refresh_all()
 
+    def _transaction_from_form(self) -> TransactionInput:
+        return TransactionInput(
+            amount=float(self.amount_var.get().strip()),
+            transaction_type=self.register_type_key,
+            category=self.category_var.get().strip(),
+            transaction_date=date.fromisoformat(self.date_var.get().strip()),
+            description=self.description_text.get("1.0", "end").strip(),
+        )
+
     def _clear_form(self, keep_date: bool = False) -> None:
-        self.type_var.set("Gasto")
+        self.editing_transaction_id = None
+        self.register_type_key = "expense"
+        self.type_var.set(self._type_db_to_display.get(self.register_type_key, tr(self.language, "type_expense")))
         self.amount_var.set("")
         self._on_register_type_changed()
         if not keep_date:
             self.date_var.set(date.today().isoformat())
         self.description_text.delete("1.0", "end")
+        self._update_save_button_text()
 
-    def _on_register_type_changed(self) -> None:
-        current_type = self.type_var.get().strip()
-        category_options = CATEGORIES_BY_TYPE.get(current_type, CATEGORIES_BY_TYPE["Gasto"])
-        self.category_box.configure(values=category_options)
-
-        if self.category_var.get() not in category_options:
-            self.category_var.set(category_options[0])
+    def _update_save_button_text(self) -> None:
+        if not hasattr(self, "save_button_var"):
+            return
+        if self.editing_transaction_id is None:
+            self.save_button_var.set(tr(self.language, "btn_save_transaction"))
+        else:
+            self.save_button_var.set(tr(self.language, "btn_update_transaction"))
 
     def _refresh_all(self) -> None:
         self._load_transactions()
         self._load_stats()
 
-    def _load_transactions(self) -> None:
-        self._clear_tree(self.transactions_tree)
-        rows = self.database.fetch_transactions(limit=None)
-        self._sync_category_filter(rows)
-
-        filtered_rows = self._apply_transaction_filters(rows)
-        sorted_rows = self._sort_transactions(filtered_rows)
-
-        for row in sorted_rows:
-            self.transactions_tree.insert(
-                "",
-                "end",
-                values=(
-                    row["id"],
-                    row["transaction_date"],
-                    TYPE_DB_TO_UI.get(str(row["transaction_type"]), str(row["transaction_type"])),
-                    row["category"],
-                    f"{float(row['amount']):.2f}",
-                    row["description"],
-                ),
-            )
-
-        self.filtered_count_var.set(f"Mostrando: {len(sorted_rows)} de {len(rows)}")
-
     def _on_search_change(self, *_: object) -> None:
         self._on_filter_change()
 
     def _on_filter_change(self) -> None:
+        self.filter_type_key = self._filter_display_to_key.get(self.filter_type_var.get().strip(), "all")
+        self._current_page = 0
         self._load_transactions()
         self._save_ui_state()
 
@@ -712,12 +1044,13 @@ class ExpensesApp(tk.Tk):
             if on_change is not None:
                 on_change()
 
-        CalendarDialog(self, initial, _apply, title=title)
+        CalendarDialog(self, initial, _apply, language=self.language, title=title)
 
     def _clear_filters(self) -> None:
         self.search_var.set("")
-        self.filter_type_var.set("Todos")
-        self.filter_category_var.set("Todas")
+        self.filter_type_key = "all"
+        self.filter_type_var.set(self._filter_key_to_display[self.filter_type_key])
+        self.filter_category_var.set(self._all_label)
         self.filter_from_var.set("")
         self.filter_to_var.set("")
         self._on_filter_change()
@@ -752,57 +1085,126 @@ class ExpensesApp(tk.Tk):
 
     def _sync_category_filter(self, rows: list[dict[str, object]]) -> None:
         categories = sorted({str(row["category"]) for row in rows})
-        values = ["Todas", *categories]
+        values = [self._all_label, *categories]
         self.category_filter_box.configure(values=values)
-        if self.filter_category_var.get() not in values:
-            self.filter_category_var.set("Todas")
+
+        current = self.filter_category_var.get().strip()
+        if not current or current not in values:
+            self.filter_category_var.set(self._all_label)
 
     def _apply_transaction_filters(self, rows: list[dict[str, object]]) -> list[dict[str, object]]:
-        search = self.search_var.get().strip().lower()
-        selected_type_db = FILTER_TYPE_TO_DB.get(self.filter_type_var.get().strip(), "")
-        selected_category = self.filter_category_var.get().strip().lower()
+        selected_type_db = "" if self.filter_type_key == "all" else self.filter_type_key
         date_from = self._safe_parse_date(self.filter_from_var.get())
         date_to = self._safe_parse_date(self.filter_to_var.get())
 
-        filtered: list[dict[str, object]] = []
-        for row in rows:
-            row_type = str(row["transaction_type"]).lower()
-            row_category = str(row["category"]).lower()
-            row_date = self._safe_parse_date(str(row["transaction_date"]))
+        return filter_transaction_rows(
+            rows=rows,
+            search=self.search_var.get(),
+            selected_type_db=selected_type_db,
+            selected_category=self.filter_category_var.get(),
+            all_label=self._all_label,
+            date_from=date_from,
+            date_to=date_to,
+            type_db_to_display=self._type_db_to_display,
+        )
 
-            if selected_type_db and row_type != selected_type_db:
-                continue
-            if selected_category != "todas" and row_category != selected_category:
-                continue
-            if date_from and row_date and row_date < date_from:
-                continue
-            if date_to and row_date and row_date > date_to:
-                continue
+    def _selected_transaction_data(self) -> dict[str, str] | None:
+        selection = self.transactions_tree.selection()
+        if not selection:
+            return None
 
-            if search:
-                searchable = " ".join(
-                    [
-                        str(row["id"]),
-                        str(row["transaction_date"]),
-                        TYPE_DB_TO_UI.get(str(row["transaction_type"]), str(row["transaction_type"])),
-                        str(row["category"]),
-                        str(row["amount"]),
-                        str(row["description"]),
-                    ]
-                ).lower()
-                if search not in searchable:
-                    continue
+        values = self.transactions_tree.item(selection[0], "values")
+        if len(values) < 6:
+            return None
 
-            filtered.append(row)
+        return {
+            "id": str(values[0]),
+            "date": str(values[1]),
+            "type": str(values[2]),
+            "category": str(values[3]),
+            "amount": str(values[4]),
+            "description": str(values[5]),
+        }
 
-        return filtered
+    def _load_selected_into_form(self) -> None:
+        row = self._selected_transaction_data()
+        if row is None:
+            messagebox.showwarning(
+                tr(self.language, "warning_select_title"),
+                tr(self.language, "warning_select_transaction"),
+                parent=self,
+            )
+            return
+
+        self.editing_transaction_id = int(row["id"])
+        display_type = row["type"]
+        db_type = self._type_display_to_db.get(display_type, "expense")
+        self.register_type_key = db_type
+        self.type_var.set(self._type_db_to_display.get(db_type, display_type))
+        self._on_register_type_changed()
+
+        self.amount_var.set(row["amount"])
+        self.date_var.set(row["date"])
+
+        category_value = row["category"]
+        options = list(self.category_box["values"])
+        if category_value not in options:
+            options.append(category_value)
+            self.category_box.configure(values=options)
+        self.category_var.set(category_value)
+
+        self.description_text.delete("1.0", "end")
+        self.description_text.insert("1.0", row["description"])
+        self._update_save_button_text()
+
+        if self._notebook is not None and self._tab_register is not None:
+            self._notebook.select(self._tab_register)
+
+    def _delete_selected_transaction(self) -> None:
+        row = self._selected_transaction_data()
+        if row is None:
+            messagebox.showwarning(
+                tr(self.language, "warning_select_title"),
+                tr(self.language, "warning_select_transaction"),
+                parent=self,
+            )
+            return
+
+        confirm = messagebox.askyesno(
+            tr(self.language, "confirm_delete_title"),
+            tr(self.language, "confirm_delete_message", id=row["id"]),
+            parent=self,
+        )
+        if not confirm:
+            return
+
+        try:
+            deleted = self.database.delete_transaction(int(row["id"]))
+        except Exception as error:
+            messagebox.showerror(
+                tr(self.language, "error_generic"),
+                tr(self.language, "delete_failed", error=error),
+                parent=self,
+            )
+            return
+
+        if not deleted:
+            messagebox.showerror(
+                tr(self.language, "error_generic"),
+                tr(self.language, "delete_failed", error=tr(self.language, "delete_not_found")),
+                parent=self,
+            )
+            return
+
+        messagebox.showinfo(
+            tr(self.language, "success"),
+            tr(self.language, "delete_success"),
+            parent=self,
+        )
+        self._refresh_all()
 
     def _sort_transactions(self, rows: list[dict[str, object]]) -> list[dict[str, object]]:
-        return sorted(
-            rows,
-            key=self._row_sort_key,
-            reverse=self.sort_desc,
-        )
+        return sorted(rows, key=self._row_sort_key, reverse=self.sort_desc)
 
     def _row_sort_key(self, row: dict[str, object]) -> tuple[int, object]:
         if self.sort_column == "id":
@@ -834,9 +1236,7 @@ class ExpensesApp(tk.Tk):
     def _refresh_sort_headers(self) -> None:
         arrow = "▼" if self.sort_desc else "▲"
         for column_name, title in self._column_titles.items():
-            label = title
-            if column_name == self.sort_column:
-                label = f"{title} {arrow}"
+            label = title if column_name != self.sort_column else f"{title} {arrow}"
             self.transactions_tree.heading(
                 column_name,
                 text=label,
@@ -845,33 +1245,7 @@ class ExpensesApp(tk.Tk):
 
     @staticmethod
     def _safe_parse_date(raw_value: str) -> date | None:
-        value = raw_value.strip()
-        if not value:
-            return None
-        try:
-            return date.fromisoformat(value)
-        except ValueError:
-            return None
-
-    @staticmethod
-    def _normalize_filter_type(value: str) -> str:
-        value_clean = value.strip()
-        mapping = {
-            "all": "Todos",
-            "income": "Ingresos",
-            "expense": "Gastos",
-            "Todos": "Todos",
-            "Ingresos": "Ingresos",
-            "Gastos": "Gastos",
-        }
-        return mapping.get(value_clean, "Todos")
-
-    @staticmethod
-    def _normalize_filter_category(value: str) -> str:
-        value_clean = value.strip()
-        if value_clean in {"", "all"}:
-            return "Todas"
-        return value_clean
+        return safe_parse_date(raw_value)
 
     def _read_ui_state(self) -> dict[str, Any]:
         if not self.state_file.exists():
@@ -884,9 +1258,12 @@ class ExpensesApp(tk.Tk):
 
     def _save_ui_state(self) -> None:
         data = {
+            "language": self.language,
             "theme_mode": self.theme_mode,
+            "palette": self.palette,
             "search": self.search_var.get(),
-            "filter_type": self.filter_type_var.get(),
+            "register_type_key": self.register_type_key,
+            "filter_type_key": self.filter_type_key,
             "filter_category": self.filter_category_var.get(),
             "filter_from": self.filter_from_var.get(),
             "filter_to": self.filter_to_var.get(),
@@ -896,11 +1273,19 @@ class ExpensesApp(tk.Tk):
 
         try:
             self.state_file.parent.mkdir(parents=True, exist_ok=True)
-            self.state_file.write_text(json.dumps(data, ensure_ascii=True, indent=2), encoding="utf-8")
+            if self.state_file.parent != Path("."):
+                apply_private_permissions(self.state_file.parent, directory=True)
+
+            temporary_file = self.state_file.with_suffix(self.state_file.suffix + ".tmp")
+            temporary_file.write_text(json.dumps(data, ensure_ascii=True, indent=2), encoding="utf-8")
+            apply_private_permissions(temporary_file)
+            temporary_file.replace(self.state_file)
+            apply_private_permissions(self.state_file)
         except OSError:
             return
 
     def _on_close(self) -> None:
+        self.scheduler.stop()
         self._save_ui_state()
         self.destroy()
 
@@ -911,7 +1296,6 @@ class ExpensesApp(tk.Tk):
 
     def _set_theme(self, mode: str) -> None:
         self.theme_mode = "dark" if mode == "dark" else "light"
-        self._colors = self._build_palette(self.theme_mode)
         self._setup_theme()
         self._apply_runtime_theme()
         self._update_theme_button_text()
@@ -923,51 +1307,59 @@ class ExpensesApp(tk.Tk):
                 foreground=self._colors["text"],
                 insertbackground=self._colors["text"],
             )
+        if hasattr(self, "transactions_tree"):
+            self.transactions_tree.tag_configure("income", foreground=self._colors["positive"])
+            self.transactions_tree.tag_configure("expense", foreground=self._colors["negative"])
+        self._update_kpi_colors()
 
     def _update_theme_button_text(self) -> None:
         if hasattr(self, "theme_button"):
             if self.theme_mode == "light":
-                self.theme_button.configure(text="Modo oscuro")
+                self.theme_button.configure(text=tr(self.language, "btn_dark_mode"))
             else:
-                self.theme_button.configure(text="Modo claro")
-
-    @staticmethod
-    def _build_palette(mode: str) -> dict[str, str]:
-        if mode == "dark":
-            return {
-                "bg": "#0b1220",
-                "card": "#111827",
-                "header": "#020617",
-                "text": "#e5e7eb",
-                "muted": "#9ca3af",
-                "accent": "#38bdf8",
-                "accent_hover": "#0ea5e9",
-                "line": "#2a3547",
-                "input_bg": "#1f2937",
-                "notebook_bg": "#182233",
-                "select_bg": "#1e3a8a",
-                "select_fg": "#dbeafe",
-            }
-
-        return {
-            "bg": "#f4f7fb",
-            "card": "#ffffff",
-            "header": "#0f172a",
-            "text": "#1f2937",
-            "muted": "#6b7280",
-            "accent": "#0ea5e9",
-            "accent_hover": "#0284c7",
-            "line": "#dbe2ea",
-            "input_bg": "#ffffff",
-            "notebook_bg": "#e9eef5",
-            "select_bg": "#dbeafe",
-            "select_fg": "#1e3a8a",
-        }
+                self.theme_button.configure(text=tr(self.language, "btn_light_mode"))
 
     def _setup_theme(self) -> None:
-        style = ttk.Style(self)
-        style.theme_use("clam")
+        theme_name = "flatly" if self.theme_mode == "light" else "darkly"
+        self._ttkb_style = ttkb.Style(theme_name)
+        c = self._ttkb_style.colors
 
+        if self.theme_mode == "dark":
+            self._colors = {
+                "bg": c.bg,
+                "card": "#2b2b2b",
+                "header": c.dark,
+                "text": c.fg,
+                "muted": c.secondary,
+                "accent": c.primary,
+                "accent_hover": c.info,
+                "line": c.border,
+                "input_bg": c.inputbg,
+                "notebook_bg": "#333333",
+                "select_bg": c.selectbg,
+                "select_fg": c.fg,
+                "positive": c.success,
+                "negative": c.danger,
+            }
+        else:
+            self._colors = {
+                "bg": c.bg,
+                "card": "#ffffff",
+                "header": c.dark,
+                "text": c.fg,
+                "muted": c.secondary,
+                "accent": c.primary,
+                "accent_hover": c.info,
+                "line": c.border,
+                "input_bg": c.inputbg,
+                "notebook_bg": "#f0f0f0",
+                "select_bg": c.selectbg,
+                "select_fg": c.primary,
+                "positive": c.success,
+                "negative": c.danger,
+            }
+
+        style = ttk.Style(self)
         self.configure(background=self._colors["bg"])
         self.option_add("*Font", "TkDefaultFont 10")
 
@@ -975,33 +1367,6 @@ class ExpensesApp(tk.Tk):
         style.configure("App.TFrame", background=self._colors["bg"])
         style.configure("Card.TFrame", background=self._colors["card"])
         style.configure("Header.TFrame", background=self._colors["header"])
-
-        style.configure(
-            "TButton",
-            background=self._colors["card"],
-            foreground=self._colors["text"],
-            borderwidth=1,
-            relief="solid",
-            padding=(8, 6),
-        )
-        style.map(
-            "TButton",
-            background=[("active", self._colors["notebook_bg"]), ("pressed", self._colors["notebook_bg"])],
-            foreground=[("disabled", self._colors["muted"])],
-        )
-
-        style.configure(
-            "Card.TLabelframe",
-            background=self._colors["card"],
-            bordercolor=self._colors["line"],
-            relief="solid",
-        )
-        style.configure(
-            "Card.TLabelframe.Label",
-            background=self._colors["card"],
-            foreground=self._colors["text"],
-            font=("TkDefaultFont", 10, "bold"),
-        )
 
         style.configure("TLabel", background=self._colors["bg"], foreground=self._colors["text"])
         style.configure(
@@ -1057,77 +1422,320 @@ class ExpensesApp(tk.Tk):
         )
 
         style.configure(
-            "TEntry",
-            fieldbackground=self._colors["input_bg"],
-            foreground=self._colors["text"],
-            padding=6,
-        )
-        style.configure(
-            "TCombobox",
-            fieldbackground=self._colors["input_bg"],
-            foreground=self._colors["text"],
-            arrowcolor=self._colors["text"],
-            padding=5,
-        )
-        style.map(
-            "TCombobox",
-            fieldbackground=[("readonly", self._colors["input_bg"])],
-            foreground=[("readonly", self._colors["text"])],
-            selectforeground=[("readonly", self._colors["text"])],
-            selectbackground=[("readonly", self._colors["input_bg"])],
-        )
-
-        style.configure("TNotebook", background=self._colors["card"], borderwidth=0)
-        style.configure(
-            "TNotebook.Tab",
-            background=self._colors["notebook_bg"],
-            foreground=self._colors["muted"],
-            padding=(14, 8),
-        )
-        style.map(
-            "TNotebook.Tab",
-            background=[("selected", self._colors["card"])],
-            foreground=[("selected", self._colors["text"])],
-        )
-
-        style.configure(
-            "Treeview",
+            "Card.TLabelframe",
             background=self._colors["card"],
-            fieldbackground=self._colors["card"],
-            foreground=self._colors["text"],
-            rowheight=30,
             bordercolor=self._colors["line"],
-            lightcolor=self._colors["line"],
-            darkcolor=self._colors["line"],
             relief="solid",
         )
-        style.map(
-            "Treeview",
-            background=[("selected", self._colors["select_bg"])],
-            foreground=[("selected", self._colors["select_fg"])],
-        )
         style.configure(
-            "Treeview.Heading",
-            background=self._colors["notebook_bg"],
+            "Card.TLabelframe.Label",
+            background=self._colors["card"],
             foreground=self._colors["text"],
-            relief="flat",
             font=("TkDefaultFont", 10, "bold"),
-            padding=(6, 6),
         )
 
-        style.configure(
-            "TSpinbox",
-            fieldbackground=self._colors["input_bg"],
-            foreground=self._colors["text"],
-            arrowcolor=self._colors["text"],
+    def _setup_shortcuts(self) -> None:
+        self.bind_all("<Control-n>", lambda _event: self._shortcut_new_transaction())
+        self.bind_all("<Control-f>", lambda _event: self._shortcut_focus_search())
+        self.bind_all("<Control-s>", lambda _event: self._shortcut_save())
+        self.bind_all("<F5>", lambda _event: self._refresh_all())
+        self.bind_all("<Control-g>", lambda _event: self._generate_charts())
+        self.bind_all("<Control-e>", lambda _event: self._quick_export())
+        self.bind_all("<Control-1>", lambda _event: self._select_tab(0))
+        self.bind_all("<Control-2>", lambda _event: self._select_tab(1))
+        self.bind_all("<Control-3>", lambda _event: self._select_tab(2))
+
+    def _shortcut_new_transaction(self) -> None:
+        focused = self.focus_get()
+        if isinstance(focused, (tk.Entry, tk.Text)):
+            return
+        self._select_tab(0)
+        self._clear_form(keep_date=True)
+        if hasattr(self, "amount_entry"):
+            self.amount_entry.focus_set()
+
+    def _shortcut_focus_search(self) -> None:
+        self._select_tab(1)
+        if hasattr(self, "search_entry"):
+            self.search_entry.focus_set()
+
+    def _shortcut_save(self) -> None:
+        focused = self.focus_get()
+        if isinstance(focused, tk.Text):
+            return
+        self._save_transaction()
+
+    def _select_tab(self, index: int) -> None:
+        if self._notebook is not None:
+            self._notebook.select(index)
+
+    def _validate_amount(self, *_: object) -> None:
+        value = self.amount_var.get().strip()
+        if not value:
+            self._set_indicator(self._amount_indicator, "")
+            return
+        try:
+            amount = float(value)
+            if amount > 0 and amount == amount and abs(amount) != float("inf"):
+                self._set_indicator(self._amount_indicator, "✓", self._colors["positive"])
+            else:
+                self._set_indicator(self._amount_indicator, "✗", self._colors["negative"])
+        except ValueError:
+            self._set_indicator(self._amount_indicator, "✗", self._colors["negative"])
+
+    def _validate_date(self, *_: object) -> None:
+        value = self.date_var.get().strip()
+        if not value:
+            self._set_indicator(self._date_indicator, "")
+            return
+        try:
+            date.fromisoformat(value)
+            self._set_indicator(self._date_indicator, "✓", self._colors["positive"])
+        except ValueError:
+            self._set_indicator(self._date_indicator, "✗", self._colors["negative"])
+
+    def _validate_category(self, *_: object) -> None:
+        value = self.category_var.get().strip()
+        if value:
+            self._set_indicator(self._category_indicator, "✓", self._colors["positive"])
+        else:
+            self._set_indicator(self._category_indicator, "✗", self._colors["negative"])
+
+    @staticmethod
+    def _set_indicator(label: ttk.Label | None, text: str, color: str = "") -> None:
+        if label is None:
+            return
+        label.configure(text=text, foreground=color if color else label.master["style"])
+
+    def _go_to_page(self, delta: int) -> None:
+        new_page = self._current_page + delta
+        if 0 <= new_page < self._total_pages:
+            self._current_page = new_page
+            self._load_transactions()
+
+    def _update_charts(self) -> None:
+        category_rows = self.database.get_totals_by_category()
+        month_rows = self.database.get_totals_by_month()
+
+        self._destroy_chart(self._chart_canvas_category, self._chart_toolbar_category)
+        self._destroy_chart(self._chart_canvas_month, self._chart_toolbar_month)
+
+        if not category_rows and not month_rows:
+            return
+
+        self._chart_scroll_cids: list[int] = []
+
+        if category_rows and hasattr(self, "_chart_frame_category"):
+            figure = Figure(figsize=(5, 3), dpi=100)
+            axis = figure.add_subplot(111)
+            categories = [r["category"] for r in category_rows]
+            expense_values = [float(r["expense"]) for r in category_rows]
+            income_values = [float(r["income"]) for r in category_rows]
+            x = range(len(categories))
+            axis.bar(x, income_values, label=tr(self.language, "legend_income"), color=self._colors["positive"])
+            axis.bar(x, expense_values, label=tr(self.language, "legend_expense"), color=self._colors["negative"], alpha=0.85)
+            axis.set_xticks(list(x))
+            axis.set_xticklabels(categories, rotation=30, ha="right", fontsize=8)
+            axis.legend(fontsize=8)
+            axis.set_title(tr(self.language, "chart_title_category"), fontsize=10)
+            self._add_tooltip_to_bars(axis, categories, income_values, expense_values)
+            figure.tight_layout()
+            self._chart_canvas_category = FigureCanvasTkAgg(figure, master=self._chart_frame_category)
+            self._chart_canvas_category.draw()
+            self._chart_canvas_category.get_tk_widget().pack(fill="both", expand=True)
+            self._chart_toolbar_category = NavigationToolbar2Tk(self._chart_canvas_category, self._chart_frame_category, pack_toolbar=False)
+            self._chart_toolbar_category.update()
+            self._chart_toolbar_category.pack(fill="x", side="bottom")
+            cid = self._enable_scroll_zoom(figure, axis)
+            if cid is not None:
+                self._chart_scroll_cids.append(cid)
+
+        if month_rows and hasattr(self, "_chart_frame_month"):
+            figure = Figure(figsize=(5, 3), dpi=100)
+            axis = figure.add_subplot(111)
+            months = [r["month"] for r in month_rows]
+            income_values = [float(r["income"]) for r in month_rows]
+            expense_values = [float(r["expense"]) for r in month_rows]
+            balance_values = [float(r["balance"]) for r in month_rows]
+            if self._show_income.get():
+                axis.plot(months, income_values, marker="o", label=tr(self.language, "legend_income"), color=self._colors["positive"])
+            if self._show_expense.get():
+                axis.plot(months, expense_values, marker="o", label=tr(self.language, "legend_expense"), color=self._colors["negative"])
+            if self._show_balance.get():
+                axis.plot(months, balance_values, marker="o", label=tr(self.language, "legend_balance"), color=self._colors["accent"])
+            axis.set_xticklabels(months, rotation=30, ha="right", fontsize=8)
+            if any([self._show_income.get(), self._show_expense.get(), self._show_balance.get()]):
+                axis.legend(fontsize=8)
+            axis.set_title(tr(self.language, "chart_title_month"), fontsize=10)
+            axis.grid(alpha=0.3)
+            self._add_tooltip_to_lines(axis, months, income_values, expense_values, balance_values)
+            figure.tight_layout()
+            self._chart_canvas_month = FigureCanvasTkAgg(figure, master=self._chart_frame_month)
+            self._chart_canvas_month.draw()
+            self._chart_canvas_month.get_tk_widget().pack(fill="both", expand=True)
+            self._chart_toolbar_month = NavigationToolbar2Tk(self._chart_canvas_month, self._chart_frame_month, pack_toolbar=False)
+            self._chart_toolbar_month.update()
+            self._chart_toolbar_month.pack(fill="x", side="bottom")
+            cid = self._enable_scroll_zoom(figure, axis)
+            if cid is not None:
+                self._chart_scroll_cids.append(cid)
+
+    def _destroy_chart(self, canvas: FigureCanvasTkAgg | None, toolbar: NavigationToolbar2Tk | None) -> None:
+        if canvas is not None:
+            canvas.get_tk_widget().destroy()
+        if toolbar is not None:
+            toolbar.destroy()
+
+    def _add_tooltip_to_bars(self, axis, categories, income_values, expense_values) -> None:
+        tooltip = tk.Toplevel(self)
+        tooltip.overrideredirect(True)
+        tooltip.withdraw()
+        label = ttk.Label(tooltip, text="", background="yellow", relief="solid", borderwidth=1, padding=(4, 2))
+        label.pack()
+
+        def on_motion(event):
+            if event.inaxes != axis:
+                tooltip.withdraw()
+                return
+            found = False
+            for bar, cat, inc, exp in zip(axis.patches, categories, income_values, expense_values):
+                if bar.contains_point((event.x, event.y), radius=5):
+                    text = f"{cat}\n{tr(self.language, 'legend_income')}: {inc:.2f}\n{tr(self.language, 'legend_expense')}: {exp:.2f}"
+                    label.configure(text=text)
+                    tooltip.deiconify()
+                    tooltip.geometry(f"+{self.winfo_pointerx() + 15}+{self.winfo_pointery() + 15}")
+                    found = True
+                    break
+            if not found:
+                tooltip.withdraw()
+
+        axis.figure.canvas.mpl_connect("motion_notify_event", on_motion)
+
+    def _add_tooltip_to_lines(self, axis, months, income_values, expense_values, balance_values) -> None:
+        tooltip = tk.Toplevel(self)
+        tooltip.overrideredirect(True)
+        tooltip.withdraw()
+        label = ttk.Label(tooltip, text="", background="yellow", relief="solid", borderwidth=1, padding=(4, 2))
+        label.pack()
+
+        def on_motion(event):
+            if event.inaxes != axis:
+                tooltip.withdraw()
+                return
+            found = False
+            # Check proximity to each data point using data coordinates
+            for i, month in enumerate(months):
+                x_data = i
+                for y_data, key, color in [
+                    (income_values[i], "legend_income", self._colors["positive"]),
+                    (expense_values[i], "legend_expense", self._colors["negative"]),
+                    (balance_values[i], "legend_balance", self._colors["accent"]),
+                ]:
+                    # Convert data to display coordinates
+                    x_display, y_display = axis.transData.transform((x_data, y_data))
+                    dist = ((event.x - x_display) ** 2 + (event.y - y_display) ** 2) ** 0.5
+                    if dist < 10:
+                        text = (
+                            f"{month}\n"
+                            f"{tr(self.language, 'legend_income')}: {income_values[i]:.2f}\n"
+                            f"{tr(self.language, 'legend_expense')}: {expense_values[i]:.2f}\n"
+                            f"{tr(self.language, 'legend_balance')}: {balance_values[i]:.2f}"
+                        )
+                        label.configure(text=text)
+                        tooltip.deiconify()
+                        tooltip.geometry(f"+{self.winfo_pointerx() + 15}+{self.winfo_pointery() + 15}")
+                        found = True
+                        break
+                if found:
+                    break
+            if not found:
+                tooltip.withdraw()
+
+        axis.figure.canvas.mpl_connect("motion_notify_event", on_motion)
+
+    def _enable_scroll_zoom(self, figure, axis):
+        def on_scroll(event):
+            if event.inaxes != axis:
+                return
+            x_min, x_max = axis.get_xlim()
+            y_min, y_max = axis.get_ylim()
+            # Zoom factor: step > 0 zoom in, step < 0 zoom out
+            factor = 0.9 if event.step > 0 else 1.1
+            # Keep the point under the cursor fixed
+            x_data, y_data = event.xdata, event.ydata
+            if x_data is None or y_data is None:
+                return
+            new_x_min = x_data - (x_data - x_min) * factor
+            new_x_max = x_data + (x_max - x_data) * factor
+            new_y_min = y_data - (y_data - y_min) * factor
+            new_y_max = y_data + (y_max - y_data) * factor
+            axis.set_xlim(new_x_min, new_x_max)
+            axis.set_ylim(new_y_min, new_y_max)
+            figure.canvas.draw_idle()
+
+        cid = figure.canvas.mpl_connect("scroll_event", on_scroll)
+        return cid
+
+    def _load_transactions(self) -> None:
+        self._clear_tree(self.transactions_tree)
+        rows = self.database.fetch_transactions(limit=None)
+        self._sync_category_filter(rows)
+
+        filtered_rows = self._apply_transaction_filters(rows)
+        sorted_rows = self._sort_transactions(filtered_rows)
+
+        total = len(sorted_rows)
+        self._total_pages = max(1, (total + self._page_size - 1) // self._page_size)
+        self._current_page = min(self._current_page, self._total_pages - 1)
+
+        start = self._current_page * self._page_size
+        end = start + self._page_size
+        page_rows = sorted_rows[start:end]
+
+        for row in page_rows:
+            tag = "income" if row["transaction_type"] == "income" else "expense"
+            self.transactions_tree.insert(
+                "",
+                "end",
+                values=(
+                    row["id"],
+                    row["transaction_date"],
+                    self._type_db_to_display.get(str(row["transaction_type"]), str(row["transaction_type"])),
+                    row["category"],
+                    f"{float(row['amount']):.2f}",
+                    row["description"],
+                ),
+                tags=(tag,),
+            )
+
+        self.filtered_count_var.set(
+            tr(
+                self.language,
+                "showing_rows_paginated",
+                filtered=len(page_rows),
+                total=total,
+                page=self._current_page + 1,
+                pages=self._total_pages,
+            )
         )
+
+        if hasattr(self, "_page_label_var"):
+            self._page_label_var.set(f"{self._current_page + 1} / {self._total_pages}")
+        if hasattr(self, "_btn_prev"):
+            self._btn_prev.configure(state="normal" if self._current_page > 0 else "disabled")
+        if hasattr(self, "_btn_next"):
+            self._btn_next.configure(state="normal" if self._current_page < self._total_pages - 1 else "disabled")
 
     def _load_stats(self) -> None:
         self._clear_tree(self.category_tree)
         self._clear_tree(self.month_tree)
 
-        balance = self.database.get_balance()
-        self.balance_var.set(f"Balance actual: {balance:.2f}")
+        totals = self.database.get_totals_by_type()
+        self._last_totals = totals
+        self.balance_var.set(tr(self.language, "balance_label", amount=totals["balance"]))
+        self.income_var.set(tr(self.language, "income_total_label", amount=totals["income"]))
+        self.expense_var.set(tr(self.language, "expense_total_label", amount=totals["expense"]))
+        self._update_kpi_colors()
 
         for row in self.database.get_totals_by_category():
             self.category_tree.insert(
@@ -1153,55 +1761,154 @@ class ExpensesApp(tk.Tk):
                 ),
             )
 
+        self._update_charts()
+
+    def _update_kpi_colors(self) -> None:
+        if not hasattr(self, "balance_label"):
+            return
+
+        balance = float(self._last_totals.get("balance", 0.0))
+        self.balance_label.configure(
+            foreground=self._colors["positive"] if balance >= 0 else self._colors["negative"]
+        )
+
+        if hasattr(self, "income_label"):
+            self.income_label.configure(foreground=self._colors["positive"])
+        if hasattr(self, "expense_label"):
+            self.expense_label.configure(foreground=self._colors["negative"])
+
     def _generate_charts(self) -> None:
-        dialog = ChartTypeDialog(self)
+        dialog = ChartTypeDialog(self, self.language, self._chart_type_options())
         self.wait_window(dialog)
 
         if not dialog.selected_kind:
             return
 
         try:
-            generated = generate_charts(
+            budget_rows: list[dict[str, object]] | None = None
+            if dialog.selected_kind == "budget":
+                today = date.today()
+                month_str = today.strftime("%Y-%m")
+                budget_rows = self.database.get_budget_vs_actual(month_str)
+
+            ChartViewerDialog(
+                parent=self,
+                language=self.language,
+                palette=self.palette,
+                kind=dialog.selected_kind,
                 category_rows=self.database.get_totals_by_category(),
                 month_rows=self.database.get_totals_by_month(),
-                output_dir="reports",
-                kind=dialog.selected_kind,
+                budget_rows=budget_rows,
             )
         except Exception as error:
-            messagebox.showerror("Error", f"No se pudieron generar graficas: {error}", parent=self)
-            return
+            messagebox.showerror(
+                tr(self.language, "error_generic"),
+                tr(self.language, "error_chart_failed", error=error),
+                parent=self,
+            )
 
-        if not generated:
-            messagebox.showwarning("Sin datos", "No hay datos para generar graficas.", parent=self)
+    def _on_palette_change(self) -> None:
+        new_palette = self.palette_var.get().strip()
+        if new_palette == self.palette:
             return
+        self.palette = new_palette
+        self._update_charts()
+        self._save_ui_state()
 
-        files_text = "\n".join(path.as_posix() for path in generated)
-        messagebox.showinfo("Graficas generadas", files_text, parent=self)
+    def _open_automation_dialog(self) -> None:
+        AutomationDialog(
+            parent=self,
+            database=self.database,
+            scheduler=self.scheduler,
+            language=self.language,
+        )
 
     def _export(self, fmt: str) -> None:
-        transactions = self.database.fetch_transactions(limit=None)
+        all_transactions = self.database.fetch_transactions(limit=None)
+        transactions = self._apply_transaction_filters(all_transactions)
         if not transactions:
-            messagebox.showwarning("Sin datos", "No hay movimientos para exportar.", parent=self)
+            messagebox.showwarning(
+                tr(self.language, "warning_no_data"),
+                tr(self.language, "warning_no_transactions_export"),
+                parent=self,
+            )
             return
+
+        category_rows = _compute_category_rows_from_transactions(transactions)
+        month_rows = _compute_month_rows_from_transactions(transactions)
 
         try:
             generated = export_reports(
                 transactions=transactions,
-                category_rows=self.database.get_totals_by_category(),
-                month_rows=self.database.get_totals_by_month(),
+                category_rows=category_rows,
+                month_rows=month_rows,
                 output_dir="reports",
                 fmt=fmt,
+                language=self.language,
             )
         except Exception as error:
-            messagebox.showerror("Error", f"No se pudo exportar: {error}", parent=self)
+            messagebox.showerror(
+                tr(self.language, "error_generic"),
+                tr(self.language, "error_export_failed", error=error),
+                parent=self,
+            )
             return
 
         if not generated:
-            messagebox.showwarning("Sin archivos", "No se genero ningun archivo.", parent=self)
+            messagebox.showwarning(
+                tr(self.language, "warning_no_files"),
+                tr(self.language, "warning_no_files_generated"),
+                parent=self,
+            )
             return
 
         files_text = "\n".join(path.as_posix() for path in generated)
-        messagebox.showinfo("Reportes generados", files_text, parent=self)
+        messagebox.showinfo(tr(self.language, "info_reports_generated"), files_text, parent=self)
+
+    def _quick_export(self) -> None:
+        """Export all formats for the last month with available data."""
+        all_transactions = self.database.fetch_transactions(limit=None)
+        if not all_transactions:
+            messagebox.showwarning(
+                tr(self.language, "warning_no_data"),
+                tr(self.language, "warning_no_transactions_export"),
+                parent=self,
+            )
+            return
+
+        latest_month = max(str(row["transaction_date"])[:7] for row in all_transactions)
+        month_transactions = [row for row in all_transactions if str(row["transaction_date"]).startswith(latest_month)]
+        if not month_transactions:
+            messagebox.showwarning(
+                tr(self.language, "warning_no_data"),
+                tr(self.language, "warning_no_transactions_export"),
+                parent=self,
+            )
+            return
+
+        category_rows = _compute_category_rows_from_transactions(month_transactions)
+        month_rows = _compute_month_rows_from_transactions(month_transactions)
+
+        try:
+            generated = export_reports(
+                transactions=month_transactions,
+                category_rows=category_rows,
+                month_rows=month_rows,
+                output_dir="reports",
+                fmt="all",
+                language=self.language,
+                year_month=latest_month,
+            )
+        except Exception as error:
+            messagebox.showerror(
+                tr(self.language, "error_generic"),
+                tr(self.language, "error_export_failed", error=error),
+                parent=self,
+            )
+            return
+
+        files_text = "\n".join(path.as_posix() for path in generated)
+        messagebox.showinfo(tr(self.language, "info_reports_generated"), files_text, parent=self)
 
     @staticmethod
     def _clear_tree(tree: ttk.Treeview) -> None:
@@ -1209,11 +1916,24 @@ class ExpensesApp(tk.Tk):
             tree.delete(item)
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(add_help=False)
+    parser.add_argument("--lang", default=None)
+    parser.add_argument("--list-languages", action="store_true")
+
+    args, _ = parser.parse_known_args(argv)
+    language = normalize_language(args.lang)
+
+    if args.list_languages:
+        print(tr(language, "supported_languages"))
+        for code, name in list_languages():
+            print(f"- {code}: {name}")
+        return 0
+
     try:
-        app = ExpensesApp(db_path="data/expenses.db")
+        app = ExpensesApp(db_path="data/expenses.db", initial_language=language)
     except tk.TclError as error:
-        print(f"No se pudo iniciar la interfaz grafica: {error}")
+        print(tr(language, "gui_start_error", error=error))
         return 1
 
     app.mainloop()
