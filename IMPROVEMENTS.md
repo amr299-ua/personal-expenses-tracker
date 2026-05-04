@@ -113,16 +113,19 @@ Aplicación de escritorio (Tkinter) y CLI para registrar ingresos y gastos perso
 | Prioridad | Descripción |
 |-----------|-------------|
 | Alta | Mover las traducciones de `i18n.py` a archivos externos (`.json` o `.po/gettext`). Implementar un sistema de "hot-reload" de idioma sin reiniciar la app. |
+| **Estado** | **Implementado** — Traducciones en archivos JSON externos (`locales/*.json`). `reload_translations()` recarga desde disco en `_on_language_change()` para hot-reload sin reiniciar. |
 
 ### 5.2. Formatos regionales (Locales)
 | Prioridad | Descripción |
 |-----------|-------------|
 | Media | Adaptar automáticamente los formatos de fecha (`DD/MM/YYYY` vs `MM/DD/YYYY`) y separadores de miles/decimales según el idioma seleccionado. |
+| **Estado** | **Implementado** — `format_date()` y `format_number()` en `i18n.py` usan la configuración regional del locale activo (meta `date_format`, `decimal_separator`, `thousands_separator`). Integrados en la GUI: Treeviews de transacciones, categorías, meses, tooltips de gráficas y labels de KPI.
 
 ### 5.3. Nuevos idiomas y contribución
 | Prioridad | Descripción |
 |-----------|-------------|
 | Media | Añadir idiomas asiáticos y de derecha a izquierda (RTL). Crear una herramienta simple para que traductores externos añadan idiomas. |
+| **Estado** | **Implementado** — Soporte RTL con `arabic-reshaper` y `python-bidi` para árabe (`ar`). Alineación derecha, reshaping de caracteres y justificación aplicados a widgets ttk.
 
 ---
 
@@ -132,16 +135,19 @@ Aplicación de escritorio (Tkinter) y CLI para registrar ingresos y gastos perso
 | Prioridad | Descripción |
 |-----------|-------------|
 | Alta | Implementar **SQLCipher** para encriptación AES-256 de la base de datos en reposo. Añadir pantalla de bloqueo por PIN/Contraseña al iniciar la app. |
+| **Estado** | **Implementado** — `SQLCipherManager` gestiona claves de BD cifradas con Fernet (derivada del PIN). Bloqueo al inicio con `LockManager.is_lock_active()`. Migración de BD plaintext a cifrada con backup automático. Backups manuales y automáticos programados integrados.
 
 ### 6.2. Sincronización y Backups
 | Prioridad | Descripción |
 |-----------|-------------|
 | Alta | Implementar backups automáticos rotativos. Añadir soporte para sincronización opcional con servicios cloud (WebDAV, Dropbox, Google Drive) de forma cifrada. |
+| **Estado** | **Implementado** — Backups automáticos programados (diarios/semanales/mensuales) vía `ReportScheduler._run_backup()` con checkbox en `AutomationDialog`. Rotación automática (`BackupManager.rotate_backups`). Módulo `cloud_sync.py` con proveedores WebDAV, Dropbox y Google Drive. `CloudSyncManager` cifra la BD con Fernet antes de subir. Diálogo GUI `cloud_sync_dialog.py` para configuración y sync manual.
 
 ### 6.3. Auditoría
 | Prioridad | Descripción |
 |-----------|-------------|
 | Baja | Registro de cambios (`audit_log`) para rastrear ediciones accidentales. |
+| **Estado** | **Implementado** — `AuditLog` en `security.py` (archivo JSONL) y tabla `audit_log` en la BD. Registra acciones CREATE, UPDATE, DELETE, LOGIN, BACKUP, RESTORE, LOCK_SET, LOCK_CHANGE. Accesible vía API y botón "View audit log".
 
 ---
 
