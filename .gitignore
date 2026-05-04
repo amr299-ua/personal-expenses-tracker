@@ -439,6 +439,8 @@ __pycache__/
 # Local SQLite database and generated reports
 data/*.db
 data/ui_state.json
+data/audit_log.jsonl
+data/backups/
 reports/*.pdf
 reports/*.xlsx
 reports/*.png
