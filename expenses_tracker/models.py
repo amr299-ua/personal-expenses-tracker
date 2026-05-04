@@ -97,6 +97,28 @@ class Budget(Base):
         return f"<Budget(id={self.id}, category={self.category}, month={self.month}, planned={self.planned_amount})>"
 
 
+class AuditLogEntry(Base):
+    __tablename__ = "audit_log"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    action: Mapped[str] = mapped_column(String(20), nullable=False)
+    entity: Mapped[str] = mapped_column(String(120), nullable=False, default="")
+    entity_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    details: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    timestamp: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+
+    __table_args__ = (
+        Index("idx_audit_log_action", "action"),
+        Index("idx_audit_log_entity", "entity", "entity_id"),
+        Index("idx_audit_log_timestamp", "timestamp"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<AuditLogEntry(id={self.id}, action={self.action}, entity={self.entity})>"
+
+
 class AutomationConfig(Base):
     __tablename__ = "automation_config"
 
@@ -122,8 +144,21 @@ class AutomationConfig(Base):
         return f"<AutomationConfig(id={self.id}, enabled={self.enabled}, schedule_type={self.schedule_type})>"
 
 
-def init_engine(db_path: str):
-    engine = create_engine(f"sqlite:///{db_path}", echo=False)
+def init_engine(db_path: str, cipher_key: str | None = None):
+    if cipher_key:
+        try:
+            from pysqlcipher3 import dbapi2 as sqlite
+        except ImportError as exc:
+            raise ImportError("pysqlcipher3 is required for encrypted databases. Install it with: pip install pysqlcipher3") from exc
+
+        def _connect():
+            conn = sqlite.connect(db_path)
+            conn.execute(f"PRAGMA key = '{cipher_key}'")
+            return conn
+
+        engine = create_engine("sqlite://", creator=_connect, echo=False)
+    else:
+        engine = create_engine(f"sqlite:///{db_path}", echo=False)
 
     @event.listens_for(engine, "connect")
     def _set_sqlite_pragma(dbapi_conn, connection_record):

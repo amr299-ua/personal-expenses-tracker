@@ -9,8 +9,8 @@ from sqlalchemy import select, func, delete, update, case
 from sqlalchemy.orm import sessionmaker
 
 from expenses_tracker.i18n import tr
-from expenses_tracker.security import apply_private_permissions
-from expenses_tracker.models import Base, Budget, Category, Transaction, init_engine
+from expenses_tracker.security import apply_private_permissions, AuditLog as FileAuditLog, BackupManager
+from expenses_tracker.models import Base, Budget, Category, Transaction, AuditLogEntry, init_engine
 from expenses_tracker.schemas import (
     TransactionInput as _TransactionInput,
     CategoryInput as _CategoryInput,
@@ -27,12 +27,13 @@ BudgetInput = _BudgetInput
 
 
 class ExpenseDatabase:
-    def __init__(self, db_path: str | Path = "data/expenses.db") -> None:
+    def __init__(self, db_path: str | Path = "data/expenses.db", cipher_key: str | None = None) -> None:
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         if self.db_path.parent != Path("."):
             apply_private_permissions(self.db_path.parent, directory=True)
-        self.engine = init_engine(str(self.db_path))
+        self.cipher_key = cipher_key
+        self.engine = init_engine(str(self.db_path), cipher_key=cipher_key)
         self.Session = sessionmaker(bind=self.engine)
 
     def initialize(self) -> None:
@@ -89,7 +90,9 @@ class ExpenseDatabase:
             )
             session.add(tx)
             session.commit()
-            return int(tx.id)
+            tx_id = int(tx.id)
+        self.log_audit(FileAuditLog.ACTION_CREATE, entity="transaction", entity_id=tx_id, details=f"{transaction.transaction_type} {transaction.amount}")
+        return tx_id
 
     def update_transaction(self, transaction_id: int, transaction: TransactionInput, language: str = "en") -> bool:
         self._validate_transaction(transaction, language)
@@ -111,7 +114,8 @@ class ExpenseDatabase:
             tx.tags = transaction.tags
             tx.recurring = transaction.recurring
             session.commit()
-            return True
+        self.log_audit(FileAuditLog.ACTION_UPDATE, entity="transaction", entity_id=transaction_id, details=f"{transaction.transaction_type} {transaction.amount}")
+        return True
 
     def fetch_transactions(self, limit: int | None = 50) -> list[dict[str, Any]]:
         if limit is not None and limit <= 0:
@@ -179,7 +183,10 @@ class ExpenseDatabase:
                 delete(Transaction).where(Transaction.id == transaction_id)
             )
             session.commit()
-            return result.rowcount > 0
+            deleted = result.rowcount > 0
+        if deleted:
+            self.log_audit(FileAuditLog.ACTION_DELETE, entity="transaction", entity_id=transaction_id)
+        return deleted
 
     def get_totals_by_category(self) -> list[dict[str, Any]]:
         with self.Session() as session:
@@ -476,3 +483,53 @@ class ExpenseDatabase:
 
         if len(transaction.description.strip()) > MAX_DESCRIPTION_LENGTH:
             raise ValueError(tr(language, "description_too_long", limit=MAX_DESCRIPTION_LENGTH))
+
+    # ------------------------------------------------------------------
+    # Audit logging
+    # ------------------------------------------------------------------
+
+    def log_audit(self, action: str, entity: str = "", entity_id: int | None = None, details: str = "") -> None:
+        with self.Session() as session:
+            entry = AuditLogEntry(
+                action=action,
+                entity=entity,
+                entity_id=entity_id,
+                details=details,
+            )
+            session.add(entry)
+            session.commit()
+
+    def get_audit_log(self, limit: int = 100, action: str | None = None) -> list[dict[str, Any]]:
+        with self.Session() as session:
+            stmt = select(AuditLogEntry).order_by(AuditLogEntry.timestamp.desc())
+            if action is not None:
+                stmt = stmt.where(AuditLogEntry.action == action)
+            if limit is not None:
+                stmt = stmt.limit(limit)
+            rows = session.execute(stmt).scalars().all()
+        return [
+            {
+                "id": r.id,
+                "action": r.action,
+                "entity": r.entity,
+                "entity_id": r.entity_id,
+                "details": r.details,
+                "timestamp": r.timestamp.isoformat() if r.timestamp else "",
+            }
+            for r in rows
+        ]
+
+    # ------------------------------------------------------------------
+    # Backup
+    # ------------------------------------------------------------------
+
+    def create_backup(self) -> Path:
+        FileAuditLog.log(FileAuditLog.ACTION_BACKUP, entity="database", details=f"Backup of {self.db_path}")
+        return BackupManager.create_backup(self.db_path)
+
+    def restore_backup(self, backup_name: str) -> Path:
+        FileAuditLog.log(FileAuditLog.ACTION_RESTORE, entity="database", details=f"Restore from {backup_name}")
+        return BackupManager.restore_backup(backup_name, self.db_path)
+
+    def list_backups(self) -> list[dict[str, Any]]:
+        return BackupManager.list_backups()
