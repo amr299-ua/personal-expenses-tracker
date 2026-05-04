@@ -1,6 +1,6 @@
 # Personal Expenses Tracker
 
-Aplicacion de escritorio y linea de comandos para registrar ingresos y gastos personales, con almacenamiento local en SQLite, graficas PNG y exportacion a Excel/PDF.
+Aplicacion de escritorio y linea de comandos para registrar ingresos y gastos personales, con almacenamiento local en SQLite, graficas PNG y exportacion a CSV/Excel/PDF.
 
 ## Tabla de contenido
 
@@ -32,9 +32,12 @@ La aplicacion abre la GUI por defecto. El modo CLI se activa con el flag especia
 ## Caracteristicas
 
 - GUI en Tkinter con tres secciones: registro, movimientos y estadisticas.
+- Alta y edicion de movimientos desde la interfaz, con doble clic para cargar un movimiento en el formulario.
+- Categorias predefinidas y categorias personalizadas escritas por el usuario.
 - Filtros en vivo por texto, tipo, categoria y rango de fechas.
 - Ordenamiento por columnas en tabla de movimientos.
 - Persistencia de preferencias de interfaz en `data/ui_state.json` (tema, filtros y orden).
+- Soporte multilenguaje en GUI y CLI (`--lang` y `--list-languages`).
 - Atajos de fecha: hoy, semana, mes, ano y todo.
 - Selector de fecha con calendario visual.
 - Graficas con matplotlib:
@@ -43,7 +46,7 @@ La aplicacion abre la GUI por defecto. El modo CLI se activa con el flag especia
 	- Distribucion de ingresos/gastos (pastel).
 	- Puntos mensuales con linea de balance.
 	- Barras 3D por mes.
-- Exportacion a Excel (`.xlsx`) y PDF (`.pdf`) con:
+- Exportacion a CSV (`.csv`), Excel (`.xlsx`) y PDF (`.pdf`) con:
 	- Portada.
 	- KPI principales.
 	- Resumen ejecutivo.
@@ -69,7 +72,7 @@ personal-expenses-tracker/
 		cli.py             # Comandos de consola
 		db.py              # Capa de datos SQLite
 		charts.py          # Generacion de graficas
-		exporters.py       # Exportacion Excel/PDF
+		exporters.py       # Exportacion CSV/Excel/PDF
 	scripts/
 		build_linux.sh
 		build_macos.sh
@@ -89,7 +92,7 @@ personal-expenses-tracker/
 ## Instalacion
 
 ```bash
-git clone <URL_DEL_REPOSITORIO>
+git clone https://github.com/amr299-ua/personal-expenses-tracker.git
 cd personal-expenses-tracker
 
 python -m venv .venv
@@ -113,10 +116,20 @@ Alternativa equivalente:
 python run_gui.py
 ```
 
+Cambiar idioma y listar idiomas disponibles:
+
+```bash
+python -m expenses_tracker --lang es
+python -m expenses_tracker --list-languages
+```
+
 ### 2) CLI
 
 ```bash
 python -m expenses_tracker --cli init-db
+
+python -m expenses_tracker --cli --list-languages
+python -m expenses_tracker --cli --lang es balance
 
 python -m expenses_tracker --cli add \
 	--type income \
@@ -136,7 +149,14 @@ python -m expenses_tracker --cli list --limit 20
 python -m expenses_tracker --cli balance
 python -m expenses_tracker --cli stats
 python -m expenses_tracker --cli plot --type all --output-dir reports
+python -m expenses_tracker --cli export --format csv --output-dir reports
 python -m expenses_tracker --cli export --format all --output-dir reports
+```
+
+### 3) Datos de prueba (opcional)
+
+```bash
+python seed_data.py
 ```
 
 ## Referencia CLI
@@ -144,8 +164,13 @@ python -m expenses_tracker --cli export --format all --output-dir reports
 Comando base:
 
 ```bash
-python -m expenses_tracker --cli [--db-path RUTA_DB] <comando> [opciones]
+python -m expenses_tracker --cli [--db-path RUTA_DB] [--lang CODIGO] [--list-languages] <comando> [opciones]
 ```
+
+Flags globales:
+
+- `--lang`: selecciona idioma (`en`, `es`, `fr`, `it`, `de`, `pt`).
+- `--list-languages`: lista idiomas soportados y termina.
 
 Comandos disponibles:
 
@@ -162,7 +187,7 @@ Comandos disponibles:
 - `plot`: genera graficas PNG (`--type` y `--output-dir`).
 	- `--type`: `category`, `month`, `bar`, `line`, `pie`, `scatter`, `bar3d`, `all`.
 - `export`: exporta reportes (`--format` y `--output-dir`).
-	- `--format`: `excel`, `pdf`, `all`.
+	- `--format`: `csv`, `excel`, `pdf`, `all`.
 
 ## Archivos generados
 
@@ -171,7 +196,7 @@ Por defecto, el proyecto usa estas rutas:
 - Base de datos: `data/expenses.db`
 - Estado GUI: `data/ui_state.json`
 - Graficas: `reports/chart_*.png`
-- Reportes: `reports/report_*.xlsx`, `reports/report_*.pdf`
+- Reportes: `reports/report_*.csv`, `reports/report_*.xlsx`, `reports/report_*.pdf`
 
 ## Build de ejecutables
 
@@ -216,8 +241,8 @@ Salida esperada:
 
 ## Estado del proyecto
 
-- El repositorio incluye estructura para pruebas (`tests/`), pero actualmente no hay tests implementados.
-- No hay pipeline CI/CD incluido en el repo en este momento.
+- Suite de tests con pytest en `tests/` (db, cli, charts, exporters, gui, i18n, security).
+- Workflow de build en GitHub Actions para generar binarios en tags `v*`.
 
 ## Licencia
 
