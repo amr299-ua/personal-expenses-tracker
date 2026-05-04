@@ -128,6 +128,7 @@ class AutomationConfig(Base):
     schedule_day: Mapped[int | None] = mapped_column(Integer, nullable=True)
     schedule_time: Mapped[str] = mapped_column(String(5), nullable=False, default="08:00")
     export_format: Mapped[str] = mapped_column(String(10), nullable=False, default="excel")
+    backup_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     email_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     smtp_host: Mapped[str | None] = mapped_column(String(255), nullable=True)
     smtp_port: Mapped[int | None] = mapped_column(Integer, nullable=True)

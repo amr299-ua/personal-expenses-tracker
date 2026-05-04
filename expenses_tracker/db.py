@@ -417,6 +417,7 @@ class ExpenseDatabase:
                     "schedule_day": 1,
                     "schedule_time": "08:00",
                     "export_format": "excel",
+                    "backup_enabled": False,
                     "email_enabled": False,
                     "smtp_host": None,
                     "smtp_port": None,
@@ -432,6 +433,7 @@ class ExpenseDatabase:
                 "schedule_day": row.schedule_day,
                 "schedule_time": row.schedule_time,
                 "export_format": row.export_format,
+                "backup_enabled": bool(row.backup_enabled),
                 "email_enabled": bool(row.email_enabled),
                 "smtp_host": row.smtp_host,
                 "smtp_port": row.smtp_port,
@@ -454,6 +456,7 @@ class ExpenseDatabase:
             row.schedule_day = data.get("schedule_day")
             row.schedule_time = str(data.get("schedule_time", "08:00"))
             row.export_format = str(data.get("export_format", "excel"))
+            row.backup_enabled = bool(data.get("backup_enabled", False))
             row.email_enabled = bool(data.get("email_enabled", False))
             row.smtp_host = data.get("smtp_host") or None
             row.smtp_port = data.get("smtp_port")

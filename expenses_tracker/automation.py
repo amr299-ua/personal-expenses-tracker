@@ -68,6 +68,8 @@ class ReportScheduler:
 
             if schedule_type == "daily":
                 schedule.every().day.at(schedule_time).do(self._run_report)
+                if config.get("backup_enabled"):
+                    schedule.every().day.at(schedule_time).do(self._run_backup)
             elif schedule_type == "weekly" and schedule_day is not None:
                 days = [
                     schedule.every().sunday,
@@ -80,16 +82,33 @@ class ReportScheduler:
                 ]
                 if 0 <= schedule_day < len(days):
                     days[schedule_day].at(schedule_time).do(self._run_report)
+                    if config.get("backup_enabled"):
+                        days[schedule_day].at(schedule_time).do(self._run_backup)
             elif schedule_type == "monthly" and schedule_day is not None:
                 # schedule library does not have monthly; use a daily check
                 schedule.every().day.at(schedule_time).do(
                     self._run_monthly_report, day=schedule_day
                 )
+                if config.get("backup_enabled"):
+                    schedule.every().day.at(schedule_time).do(
+                        self._run_monthly_backup, day=schedule_day
+                    )
 
     def _run_monthly_report(self, day: int) -> None:
         today = date.today()
         if today.day == day:
             self._run_report()
+
+    def _run_backup(self) -> None:
+        try:
+            self.database.create_backup()
+            logger.info("Automatic backup created")
+        except Exception:
+            logger.exception("Automatic backup failed")
+
+    def _run_monthly_backup(self, day: int) -> None:
+        if date.today().day == day:
+            self._run_backup()
 
     def _run_report(self) -> None:
         config = self.config_getter()

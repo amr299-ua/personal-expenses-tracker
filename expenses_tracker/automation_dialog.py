@@ -59,6 +59,13 @@ class AutomationDialog(tk.Toplevel):
             variable=self.enabled_var,
         ).pack(anchor="w")
 
+        self.backup_enabled_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(
+            schedule_frame,
+            text=tr(self._language, "automation_backup_enabled"),
+            variable=self.backup_enabled_var,
+        ).pack(anchor="w", pady=(6, 0))
+
         freq_row = ttk.Frame(schedule_frame)
         freq_row.pack(fill="x", pady=(6, 0))
         ttk.Label(freq_row, text=tr(self._language, "automation_frequency")).pack(side="left")
@@ -173,6 +180,7 @@ class AutomationDialog(tk.Toplevel):
     def _load_config(self) -> None:
         config = self.database.get_automation_config()
         self.enabled_var.set(bool(config.get("enabled")))
+        self.backup_enabled_var.set(bool(config.get("backup_enabled")))
         self.freq_var.set(config.get("schedule_type", "monthly"))
         day = config.get("schedule_day")
         self.day_var.set(str(day) if day is not None else "1")
@@ -199,6 +207,7 @@ class AutomationDialog(tk.Toplevel):
             port = None
         return {
             "enabled": self.enabled_var.get(),
+            "backup_enabled": self.backup_enabled_var.get(),
             "schedule_type": self.freq_var.get(),
             "schedule_day": day,
             "schedule_time": self.time_var.get().strip(),

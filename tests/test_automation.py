@@ -27,6 +27,7 @@ class TestAutomationConfigCRUD:
         assert config["schedule_day"] == 1
         assert config["schedule_time"] == "08:00"
         assert config["export_format"] == "excel"
+        assert config["backup_enabled"] is False
 
     def test_save_and_retrieve_config(self, db: ExpenseDatabase):
         db.save_automation_config(
@@ -126,3 +127,21 @@ class TestSchedulerIntegration:
 
         config = db.get_automation_config()
         assert config["last_run"] is not None
+
+    def test_run_backup_creates_backup(self, db: ExpenseDatabase, scheduler: ReportScheduler):
+        tx = TransactionInput(100.0, "income", "Salary", date(2025, 1, 1))
+        db.add_transaction(tx)
+        scheduler._run_backup()
+        assert len(db.list_backups()) >= 1
+
+    def test_update_schedule_adds_backup_job_when_backup_enabled(self, scheduler: ReportScheduler):
+        with patch("expenses_tracker.automation.schedule") as mock_schedule:
+            scheduler.update_schedule(
+                {
+                    "enabled": True,
+                    "schedule_type": "daily",
+                    "schedule_time": "08:00",
+                    "backup_enabled": True,
+                }
+            )
+            assert mock_schedule.every().day.at().do.call_count >= 2  # report + backup
