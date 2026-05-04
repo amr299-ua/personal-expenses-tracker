@@ -19,6 +19,7 @@ SPREADSHEET_FORMULA_PREFIXES = ("=", "+", "-", "@")
 
 DATA_DIR = Path("data")
 LOCK_FILE = DATA_DIR / ".lock"
+LOCK_ACTIVE_FILE = DATA_DIR / ".lock_active"
 BACKUPS_DIR = DATA_DIR / "backups"
 KEY_FILE = DATA_DIR / ".key"
 MAX_BACKUPS = 10
@@ -113,6 +114,26 @@ class LockManager:
             return False
         LockManager.set_lock(new_password)
         return True
+
+    @staticmethod
+    def is_lock_active() -> bool:
+        """Return True if the lock was explicitly activated (lock at startup)."""
+        return LOCK_FILE.exists() and LOCK_ACTIVE_FILE.exists()
+
+    @staticmethod
+    def activate_lock() -> None:
+        """Mark the lock as active (PIN will be requested at startup)."""
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
+        LOCK_ACTIVE_FILE.write_text("active", encoding="utf-8")
+        apply_private_permissions(LOCK_ACTIVE_FILE)
+
+    @staticmethod
+    def deactivate_lock() -> None:
+        """Deactivate the startup lock (keeps PIN stored)."""
+        try:
+            LOCK_ACTIVE_FILE.unlink()
+        except OSError:
+            pass
 
 
 class DatabaseEncryption:
