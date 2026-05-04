@@ -1,16 +1,27 @@
-"""Tests for the i18n module: translations, language helpers."""
+"""Tests for the i18n module: translations, language helpers, locale formatting."""
 
 from __future__ import annotations
+
+import json
+from datetime import date, datetime
+from pathlib import Path
 
 import pytest
 
 from expenses_tracker.i18n import (
     DEFAULT_LANGUAGE,
+    LOCALES_DIR,
     SUPPORTED_LANGUAGES,
+    format_date,
+    format_number,
+    get_locale_config,
+    is_rtl,
     language_label,
     list_languages,
     month_name,
     normalize_language,
+    reload_translations,
+    reshape_for_rtl,
     tr,
 )
 
@@ -199,3 +210,285 @@ class TestMonthName:
             en = month_name("en", i)
             es = month_name("es", i)
             assert en != es, f"Month {i} should differ between en and es"
+
+
+# ---------------------------------------------------------------------------
+# New languages (Japanese, Arabic)
+# ---------------------------------------------------------------------------
+
+
+class TestNewLanguages:
+    def test_japanese_is_supported(self):
+        assert "ja" in SUPPORTED_LANGUAGES
+        assert SUPPORTED_LANGUAGES["ja"] == "日本語"
+
+    def test_arabic_is_supported(self):
+        assert "ar" in SUPPORTED_LANGUAGES
+        assert SUPPORTED_LANGUAGES["ar"] == "العربية"
+
+    def test_japanese_translations_work(self):
+        result = tr("ja", "app_title")
+        assert result != "app_title"
+        assert isinstance(result, str)
+
+    def test_arabic_translations_work(self):
+        result = tr("ar", "app_title")
+        assert result != "app_title"
+        assert isinstance(result, str)
+
+    def test_japanese_key_coverage(self):
+        en_keys = _get_locale_keys("en")
+        ja_keys = _get_locale_keys("ja")
+        assert en_keys == ja_keys, f"ja locale missing keys: {en_keys - ja_keys}"
+
+    def test_arabic_key_coverage(self):
+        en_keys = _get_locale_keys("en")
+        ar_keys = _get_locale_keys("ar")
+        assert en_keys == ar_keys, f"ar locale missing keys: {en_keys - ar_keys}"
+
+    def test_arabic_rtl_flag(self):
+        config = get_locale_config("ar")
+        assert config["rtl"] is True
+
+    def test_japanese_not_rtl(self):
+        config = get_locale_config("ja")
+        assert config["rtl"] is False
+
+
+# ---------------------------------------------------------------------------
+# is_rtl() / reshape_for_rtl()
+# ---------------------------------------------------------------------------
+
+
+class TestRtlHelpers:
+    def test_is_rtl_true_for_arabic(self):
+        assert is_rtl("ar") is True
+
+    def test_is_rtl_false_for_english(self):
+        assert is_rtl("en") is False
+
+    def test_is_rtl_false_for_spanish(self):
+        assert is_rtl("es") is False
+
+    def test_reshape_for_rtl_returns_string(self):
+        result = reshape_for_rtl("مرحبا")
+        assert isinstance(result, str)
+
+    def test_reshape_for_rtl_empty_string(self):
+        assert reshape_for_rtl("") == ""
+
+    def test_reshape_for_rtl_latin_unchanged(self):
+        assert reshape_for_rtl("hello") == "hello"
+
+
+# ---------------------------------------------------------------------------
+# JSON locale files
+# ---------------------------------------------------------------------------
+
+
+class TestLocaleFiles:
+    def test_all_locales_have_json_files(self):
+        for code in SUPPORTED_LANGUAGES:
+            path = LOCALES_DIR / f"{code}.json"
+            assert path.exists(), f"Missing locale file for {code}"
+
+    def test_all_locale_files_have_meta(self):
+        for code in SUPPORTED_LANGUAGES:
+            path = LOCALES_DIR / f"{code}.json"
+            with open(path, encoding="utf-8") as f:
+                data = json.load(f)
+            assert "_meta" in data, f"{code} locale missing _meta section"
+            meta = data["_meta"]
+            assert "language_name" in meta
+            assert "code" in meta
+            assert "date_format" in meta
+            assert "decimal_separator" in meta
+            assert "thousands_separator" in meta
+            assert "rtl" in meta
+
+    def test_all_locale_files_have_translations(self):
+        for code in SUPPORTED_LANGUAGES:
+            path = LOCALES_DIR / f"{code}.json"
+            with open(path, encoding="utf-8") as f:
+                data = json.load(f)
+            assert "translations" in data, f"{code} locale missing translations section"
+            assert len(data["translations"]) > 0
+
+    def test_all_locales_match_keys_with_english(self):
+        en_keys = _get_locale_keys("en")
+        for code in SUPPORTED_LANGUAGES:
+            if code == "en":
+                continue
+            locale_keys = _get_locale_keys(code)
+            missing = en_keys - locale_keys
+            extra = locale_keys - en_keys
+            assert not missing, f"{code} missing keys: {sorted(missing)[:5]}"
+            assert not extra, f"{code} extra keys: {sorted(extra)[:5]}"
+
+    def test_locale_meta_code_matches_filename(self):
+        for code in SUPPORTED_LANGUAGES:
+            path = LOCALES_DIR / f"{code}.json"
+            with open(path, encoding="utf-8") as f:
+                data = json.load(f)
+            assert data["_meta"]["code"] == code
+
+
+# ---------------------------------------------------------------------------
+# Reload translations (hot-reload)
+# ---------------------------------------------------------------------------
+
+
+class TestReloadTranslations:
+    def test_reload_returns_supported_languages(self):
+        result = reload_translations()
+        assert isinstance(result, dict)
+        assert len(result) >= 6
+
+    def test_reload_preserves_existing_languages(self):
+        original_codes = set(SUPPORTED_LANGUAGES.keys())
+        reload_translations()
+        assert set(SUPPORTED_LANGUAGES.keys()) == original_codes
+
+    def test_reload_translations_are_still_accessible(self):
+        reload_translations()
+        assert tr("en", "app_title") == "Personal Expenses Tracker"
+        assert tr("es", "app_title") == "Control de gastos personal"
+
+    def test_reload_reflects_new_locale_file(self, tmp_path):
+        test_locale = {
+            "_meta": {
+                "language_name": "TestLang",
+                "code": "zz",
+                "date_format": "YYYY-MM-DD",
+                "decimal_separator": ".",
+                "thousands_separator": ",",
+                "rtl": False,
+            },
+            "translations": {"app_title": "Test App", "language_name": "TestLang"},
+        }
+        temp_file = tmp_path / "zz.json"
+        with open(temp_file, "w", encoding="utf-8") as f:
+            json.dump(test_locale, f)
+
+        original_dir = LOCALES_DIR
+        try:
+            import expenses_tracker.i18n as i18n_mod
+            i18n_mod.LOCALES_DIR = tmp_path
+            result = reload_translations()
+            assert "zz" in result
+            assert tr("zz", "app_title") == "Test App"
+        finally:
+            i18n_mod.LOCALES_DIR = original_dir
+            reload_translations()
+
+
+# ---------------------------------------------------------------------------
+# format_date()
+# ---------------------------------------------------------------------------
+
+
+class TestFormatDate:
+    def test_english_format(self):
+        result = format_date("en", date(2026, 5, 4))
+        assert result == "05/04/2026"
+
+    def test_spanish_format(self):
+        result = format_date("es", date(2026, 5, 4))
+        assert result == "04/05/2026"
+
+    def test_german_format(self):
+        result = format_date("de", date(2026, 5, 4))
+        assert result == "04.05.2026"
+
+    def test_japanese_format(self):
+        result = format_date("ja", date(2026, 5, 4))
+        assert result == "2026/05/04"
+
+    def test_with_datetime(self):
+        result = format_date("en", datetime(2026, 5, 4, 10, 30))
+        assert result == "05/04/2026"
+
+    def test_unknown_language_falls_back(self):
+        result = format_date("xx", date(2026, 5, 4))
+        assert isinstance(result, str)
+        assert "2026" in result
+
+
+# ---------------------------------------------------------------------------
+# format_number()
+# ---------------------------------------------------------------------------
+
+
+class TestFormatNumber:
+    def test_english_number(self):
+        assert format_number("en", 1234567.89) == "1,234,567.89"
+
+    def test_spanish_number(self):
+        assert format_number("es", 1234567.89) == "1.234.567,89"
+
+    def test_german_number(self):
+        assert format_number("de", 1234567.89) == "1.234.567,89"
+
+    def test_french_number(self):
+        assert format_number("fr", 1234567.89) == "1 234 567,89"
+
+    def test_small_number(self):
+        result = format_number("en", 42.5)
+        assert "42.50" in result
+
+    def test_integer_with_zero_decimals(self):
+        result = format_number("en", 1000, decimals=0)
+        assert "1,000" in result
+
+    def test_negative_number(self):
+        result = format_number("en", -1234.56)
+        assert result.startswith("-")
+
+    def test_unknown_language_falls_back(self):
+        result = format_number("xx", 1234.56)
+        assert isinstance(result, str)
+
+
+# ---------------------------------------------------------------------------
+# get_locale_config()
+# ---------------------------------------------------------------------------
+
+
+class TestGetLocaleConfig:
+    def test_english_config(self):
+        config = get_locale_config("en")
+        assert config["date_format"] == "MM/DD/YYYY"
+        assert config["decimal_separator"] == "."
+        assert config["thousands_separator"] == ","
+        assert config["rtl"] is False
+
+    def test_spanish_config(self):
+        config = get_locale_config("es")
+        assert config["date_format"] == "DD/MM/YYYY"
+        assert config["decimal_separator"] == ","
+        assert config["thousands_separator"] == "."
+        assert config["rtl"] is False
+
+    def test_arabic_rtl(self):
+        config = get_locale_config("ar")
+        assert config["rtl"] is True
+
+    def test_german_config(self):
+        config = get_locale_config("de")
+        assert config["date_format"] == "DD.MM.YYYY"
+
+    def test_japanese_config(self):
+        config = get_locale_config("ja")
+        assert config["date_format"] == "YYYY/MM/DD"
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def _get_locale_keys(code: str) -> set[str]:
+    path = LOCALES_DIR / f"{code}.json"
+    with open(path, encoding="utf-8") as f:
+        data = json.load(f)
+    return set(data["translations"].keys())

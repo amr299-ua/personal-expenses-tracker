@@ -1,9 +1,12 @@
 alembic>=1.13
+arabic-reshaper>=3.0
+cryptography>=42.0
 matplotlib>=3.8
 numpy>=1.26
 openpyxl>=3.1
 plotly>=6.0
 pydantic>=2.0
+python-bidi>=0.4
 pyyaml>=6.0
 reportlab>=4.1
 schedule>=1.2
