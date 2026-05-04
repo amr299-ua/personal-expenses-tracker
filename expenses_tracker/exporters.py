@@ -1,15 +1,30 @@
 from __future__ import annotations
 
+import csv
+import json
+from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 from xml.sax.saxutils import escape
 
+import yaml
 from openpyxl import Workbook
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.platypus import PageBreak, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+
+from expenses_tracker.i18n import tr
+from expenses_tracker.security import apply_private_permissions, sanitize_spreadsheet_text
+
+try:
+    import plotly.graph_objects as go
+    from plotly.subplots import make_subplots
+
+    _PLOTLY_AVAILABLE = True
+except Exception:  # pragma: no cover
+    _PLOTLY_AVAILABLE = False
 
 
 def export_reports(
@@ -18,24 +33,66 @@ def export_reports(
     month_rows: list[dict[str, Any]],
     output_dir: str | Path = "reports",
     fmt: str = "all",
+    language: str = "en",
+    year_month: str | None = None,
 ) -> list[Path]:
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
 
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
     generated_files: list[Path] = []
 
     if fmt in {"excel", "all"}:
         excel_file = output_path / f"report_{timestamp}.xlsx"
-        _export_excel(excel_file, transactions, category_rows, month_rows)
+        _export_excel(excel_file, transactions, category_rows, month_rows, language)
+        apply_private_permissions(excel_file)
         generated_files.append(excel_file)
+
+    if fmt in {"csv", "all"}:
+        csv_file = output_path / f"report_{timestamp}.csv"
+        _export_csv(csv_file, transactions, language)
+        apply_private_permissions(csv_file)
+        generated_files.append(csv_file)
 
     if fmt in {"pdf", "all"}:
         pdf_file = output_path / f"report_{timestamp}.pdf"
-        _export_pdf(pdf_file, transactions, category_rows, month_rows)
+        _export_pdf(pdf_file, transactions, category_rows, month_rows, language)
+        apply_private_permissions(pdf_file)
         generated_files.append(pdf_file)
 
+    if fmt in {"json", "all"}:
+        json_file = output_path / f"report_{timestamp}.json"
+        _export_json(json_file, transactions, category_rows, month_rows, language)
+        apply_private_permissions(json_file)
+        generated_files.append(json_file)
+
+    if fmt in {"yaml", "all"}:
+        yaml_file = output_path / f"report_{timestamp}.yaml"
+        _export_yaml(yaml_file, transactions, category_rows, month_rows, language)
+        apply_private_permissions(yaml_file)
+        generated_files.append(yaml_file)
+
+    if fmt in {"html", "all"}:
+        html_file = output_path / f"report_{timestamp}.html"
+        _export_html(html_file, transactions, category_rows, month_rows, language)
+        apply_private_permissions(html_file)
+        generated_files.append(html_file)
+
+    if fmt == "monthly_pdf":
+        monthly_pdf_file = output_path / f"monthly_report_{year_month or timestamp}.pdf"
+        _export_monthly_pdf(monthly_pdf_file, transactions, language, year_month)
+        apply_private_permissions(monthly_pdf_file)
+        generated_files.append(monthly_pdf_file)
+
     return generated_files
+
+
+def _localize_transaction_type(value: str, language: str) -> str:
+    if value == "income":
+        return tr(language, "type_income")
+    if value == "expense":
+        return tr(language, "type_expense")
+    return value
 
 
 def _export_excel(
@@ -43,45 +100,69 @@ def _export_excel(
     transactions: list[dict[str, Any]],
     category_rows: list[dict[str, Any]],
     month_rows: list[dict[str, Any]],
+    language: str,
 ) -> None:
     workbook = Workbook()
 
     movement_sheet = workbook.active
-    movement_sheet.title = "Movimientos"
+    movement_sheet.title = tr(language, "excel_sheet_transactions")
     movement_sheet.append(
-        ["ID", "Fecha", "Tipo", "Categoria", "Monto", "Descripcion", "Creado"]
+        [
+            tr(language, "excel_col_id"),
+            tr(language, "excel_col_date"),
+            tr(language, "excel_col_type"),
+            tr(language, "excel_col_category"),
+            tr(language, "excel_col_amount"),
+            tr(language, "excel_col_description"),
+            tr(language, "excel_col_created"),
+        ]
     )
     for row in transactions:
+        transaction_type = _localize_transaction_type(str(row["transaction_type"]), language)
         movement_sheet.append(
             [
                 row["id"],
-                row["transaction_date"],
-                row["transaction_type"],
-                row["category"],
+                sanitize_spreadsheet_text(row["transaction_date"]),
+                sanitize_spreadsheet_text(transaction_type),
+                sanitize_spreadsheet_text(row["category"]),
                 float(row["amount"]),
-                row["description"],
-                row["created_at"],
+                sanitize_spreadsheet_text(row["description"]),
+                sanitize_spreadsheet_text(row["created_at"]),
             ]
         )
 
-    category_sheet = workbook.create_sheet("PorCategoria")
-    category_sheet.append(["Categoria", "Ingresos", "Gastos", "Balance"])
+    category_sheet = workbook.create_sheet(tr(language, "excel_sheet_by_category"))
+    category_sheet.append(
+        [
+            tr(language, "excel_col_category"),
+            tr(language, "pdf_col_income"),
+            tr(language, "pdf_col_expense"),
+            tr(language, "pdf_col_balance"),
+        ]
+    )
     for row in category_rows:
         category_sheet.append(
             [
-                row["category"],
+                sanitize_spreadsheet_text(row["category"]),
                 float(row["income"]),
                 float(row["expense"]),
                 float(row["balance"]),
             ]
         )
 
-    month_sheet = workbook.create_sheet("PorMes")
-    month_sheet.append(["Mes", "Ingresos", "Gastos", "Balance"])
+    month_sheet = workbook.create_sheet(tr(language, "excel_sheet_by_month"))
+    month_sheet.append(
+        [
+            tr(language, "chart_x_month"),
+            tr(language, "pdf_col_income"),
+            tr(language, "pdf_col_expense"),
+            tr(language, "pdf_col_balance"),
+        ]
+    )
     for row in month_rows:
         month_sheet.append(
             [
-                row["month"],
+                sanitize_spreadsheet_text(row["month"]),
                 float(row["income"]),
                 float(row["expense"]),
                 float(row["balance"]),
@@ -91,11 +172,42 @@ def _export_excel(
     workbook.save(output_file)
 
 
+def _export_csv(output_file: Path, transactions: list[dict[str, Any]], language: str) -> None:
+    with output_file.open("w", newline="", encoding="utf-8-sig") as csv_file:
+        writer = csv.writer(csv_file)
+        writer.writerow(
+            [
+                tr(language, "excel_col_id"),
+                tr(language, "excel_col_date"),
+                tr(language, "excel_col_type"),
+                tr(language, "excel_col_category"),
+                tr(language, "excel_col_amount"),
+                tr(language, "excel_col_description"),
+                tr(language, "excel_col_created"),
+            ]
+        )
+
+        for row in transactions:
+            transaction_type = _localize_transaction_type(str(row["transaction_type"]), language)
+            writer.writerow(
+                [
+                    row["id"],
+                    sanitize_spreadsheet_text(row["transaction_date"]),
+                    sanitize_spreadsheet_text(transaction_type),
+                    sanitize_spreadsheet_text(row["category"]),
+                    f"{float(row['amount']):.2f}",
+                    sanitize_spreadsheet_text(row["description"]),
+                    sanitize_spreadsheet_text(row["created_at"]),
+                ]
+            )
+
+
 def _export_pdf(
     output_file: Path,
     transactions: list[dict[str, Any]],
     category_rows: list[dict[str, Any]],
     month_rows: list[dict[str, Any]],
+    language: str,
 ) -> None:
     base_styles = getSampleStyleSheet()
     styles = _build_pdf_styles(base_styles)
@@ -110,14 +222,14 @@ def _export_pdf(
     elements: list[Any] = []
 
     summary_metrics = _compute_summary_metrics(transactions, category_rows, month_rows)
-    summary_data = _build_executive_summary(summary_metrics)
+    summary_data = _build_executive_summary(summary_metrics, language)
 
-    elements.append(_build_cover_banner(summary_metrics, styles))
+    elements.append(_build_cover_banner(summary_metrics, styles, language))
     elements.append(Spacer(1, 12))
-    elements.append(_build_kpi_table(summary_metrics, styles))
+    elements.append(_build_kpi_table(summary_metrics, styles, language))
     elements.append(Spacer(1, 10))
 
-    elements.append(Paragraph("Resumen ejecutivo", styles["section_title"]))
+    elements.append(Paragraph(tr(language, "pdf_exec_summary"), styles["section_title"]))
     elements.append(Paragraph(summary_data, styles["body_text"]))
     elements.append(PageBreak())
 
@@ -133,12 +245,18 @@ def _export_pdf(
     _append_paginated_table(
         elements=elements,
         styles=styles,
-        title="Resumen por categoria",
-        header=["Categoria", "Ingresos", "Gastos", "Balance"],
+        title=tr(language, "pdf_table_category_title"),
+        header=[
+            tr(language, "excel_col_category"),
+            tr(language, "pdf_col_income"),
+            tr(language, "pdf_col_expense"),
+            tr(language, "pdf_col_balance"),
+        ],
         rows=category_table_rows,
         chunk_size=28,
         col_widths=[180, 95, 95, 95],
         text_column_indexes=[0],
+        language=language,
     )
 
     month_table_rows = [
@@ -153,18 +271,24 @@ def _export_pdf(
     _append_paginated_table(
         elements=elements,
         styles=styles,
-        title="Resumen por mes",
-        header=["Mes", "Ingresos", "Gastos", "Balance"],
+        title=tr(language, "pdf_table_month_title"),
+        header=[
+            tr(language, "chart_x_month"),
+            tr(language, "pdf_col_income"),
+            tr(language, "pdf_col_expense"),
+            tr(language, "pdf_col_balance"),
+        ],
         rows=month_table_rows,
         chunk_size=30,
         col_widths=[140, 105, 105, 105],
         text_column_indexes=[0],
+        language=language,
     )
 
     movement_table_rows = [
         [
             escape(str(row["transaction_date"])),
-            escape(str(row["transaction_type"])),
+            escape(_localize_transaction_type(str(row["transaction_type"]), language)),
             escape(str(row["category"])),
             f"{float(row['amount']):.2f}",
             escape(str(row["description"])),
@@ -174,15 +298,26 @@ def _export_pdf(
     _append_paginated_table(
         elements=elements,
         styles=styles,
-        title="Movimientos",
-        header=["Fecha", "Tipo", "Categoria", "Monto", "Descripcion"],
+        title=tr(language, "pdf_table_transactions_title"),
+        header=[
+            tr(language, "excel_col_date"),
+            tr(language, "excel_col_type"),
+            tr(language, "excel_col_category"),
+            tr(language, "excel_col_amount"),
+            tr(language, "excel_col_description"),
+        ],
         rows=movement_table_rows,
         chunk_size=22,
         col_widths=[86, 76, 102, 70, 136],
         text_column_indexes=[0, 1, 2, 4],
+        language=language,
     )
 
-    document.build(elements, onFirstPage=_draw_page_number, onLaterPages=_draw_page_number)
+    document.build(
+        elements,
+        onFirstPage=lambda canvas, doc: _draw_page_number(canvas, doc, language),
+        onLaterPages=lambda canvas, doc: _draw_page_number(canvas, doc, language),
+    )
 
 
 def _append_paginated_table(
@@ -194,10 +329,11 @@ def _append_paginated_table(
     chunk_size: int,
     col_widths: list[int],
     text_column_indexes: list[int],
+    language: str,
 ) -> None:
     if not rows:
         elements.append(Paragraph(title, styles["section_title"]))
-        elements.append(Paragraph("Sin datos para este bloque.", styles["body_text"]))
+        elements.append(Paragraph(tr(language, "pdf_no_data_block"), styles["body_text"]))
         elements.append(Spacer(1, 10))
         return
 
@@ -205,7 +341,7 @@ def _append_paginated_table(
         if index > 0:
             elements.append(PageBreak())
 
-        table_title = title if index == 0 else f"{title} (continuacion {index + 1})"
+        table_title = title if index == 0 else f"{title} {tr(language, 'pdf_continued', page=index + 1)}"
         elements.append(Paragraph(table_title, styles["section_title"]))
         elements.append(
             _styled_table(
@@ -292,17 +428,22 @@ def _compute_summary_metrics(
     }
 
 
-def _build_executive_summary(metrics: dict[str, Any]) -> str:
+def _build_executive_summary(metrics: dict[str, Any], language: str) -> str:
     lines = [
-        f"Periodo analizado: {escape(str(metrics['period_start']))} a {escape(str(metrics['period_end']))}",
-        f"Movimientos registrados: {metrics['transactions_count']}",
-        f"Ingresos acumulados: {float(metrics['total_income']):.2f}",
-        f"Gastos acumulados: {float(metrics['total_expense']):.2f}",
-        f"Balance neto: {float(metrics['balance']):.2f}",
-        f"Categorias activas: {metrics['categories_count']}",
-        f"Meses con actividad: {metrics['months_count']}",
-        f"Categoria con mayor gasto: {escape(str(metrics['top_expense']))}",
-        f"Categoria con mayor ingreso: {escape(str(metrics['top_income']))}",
+        tr(
+            language,
+            "pdf_period_analyzed",
+            start=escape(str(metrics["period_start"])),
+            end=escape(str(metrics["period_end"])),
+        ),
+        tr(language, "pdf_transactions_count", count=metrics["transactions_count"]),
+        tr(language, "pdf_income_total", amount=float(metrics["total_income"])),
+        tr(language, "pdf_expense_total", amount=float(metrics["total_expense"])),
+        tr(language, "pdf_balance_total", amount=float(metrics["balance"])),
+        tr(language, "pdf_categories_count", count=metrics["categories_count"]),
+        tr(language, "pdf_months_count", count=metrics["months_count"]),
+        tr(language, "pdf_top_expense", value=escape(str(metrics["top_expense"]))),
+        tr(language, "pdf_top_income", value=escape(str(metrics["top_income"]))),
     ]
     return "<br/>".join(lines)
 
@@ -353,17 +494,27 @@ def _build_pdf_styles(base_styles: Any) -> dict[str, ParagraphStyle]:
     }
 
 
-def _build_cover_banner(metrics: dict[str, Any], styles: dict[str, ParagraphStyle]) -> Table:
+def _build_cover_banner(
+    metrics: dict[str, Any],
+    styles: dict[str, ParagraphStyle],
+    language: str,
+) -> Table:
     subtitle = (
-        f"Generado: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}<br/>"
-        f"Periodo: {escape(str(metrics['period_start']))} a {escape(str(metrics['period_end']))}"
+        tr(language, "pdf_generated", timestamp=datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+        + "<br/>"
+        + tr(
+            language,
+            "pdf_period",
+            start=escape(str(metrics["period_start"])),
+            end=escape(str(metrics["period_end"])),
+        )
     )
     content = Paragraph(
-        "<b>Reporte de gastos personales</b><br/>" + subtitle,
+        "<b>" + tr(language, "pdf_title") + "</b><br/>" + subtitle,
         styles["cover_subtitle"],
     )
 
-    title = Paragraph("Reporte de gastos personales", styles["cover_title"])
+    title = Paragraph(tr(language, "pdf_title"), styles["cover_title"])
     table = Table([[title], [content]], colWidths=[520])
     table.setStyle(
         TableStyle(
@@ -380,25 +531,25 @@ def _build_cover_banner(metrics: dict[str, Any], styles: dict[str, ParagraphStyl
     return table
 
 
-def _build_kpi_table(metrics: dict[str, Any], styles: dict[str, ParagraphStyle]) -> Table:
+def _build_kpi_table(metrics: dict[str, Any], styles: dict[str, ParagraphStyle], language: str) -> Table:
     cells = [
         (
-            "Balance neto",
+            tr(language, "pdf_col_balance"),
             f"{float(metrics['balance']):.2f}",
             colors.HexColor("#d6f5e8"),
         ),
         (
-            "Ingresos acumulados",
+            tr(language, "pdf_col_income"),
             f"{float(metrics['total_income']):.2f}",
             colors.HexColor("#dceeff"),
         ),
         (
-            "Gastos acumulados",
+            tr(language, "pdf_col_expense"),
             f"{float(metrics['total_expense']):.2f}",
             colors.HexColor("#ffe3de"),
         ),
         (
-            "Movimientos registrados",
+            tr(language, "pdf_transactions_count", count=metrics["transactions_count"]),
             str(metrics["transactions_count"]),
             colors.HexColor("#eef1ff"),
         ),
@@ -451,13 +602,290 @@ def _chunks(items: list[list[str]], chunk_size: int) -> list[list[list[str]]]:
     return [items[index : index + chunk_size] for index in range(0, len(items), chunk_size)]
 
 
-def _draw_page_number(canvas: Any, doc: Any) -> None:
+def _draw_page_number(canvas: Any, doc: Any, language: str) -> None:
     canvas.saveState()
     canvas.setStrokeColor(colors.HexColor("#b8c4d6"))
     canvas.line(doc.leftMargin, 22, A4[0] - doc.rightMargin, 22)
 
     canvas.setFillColor(colors.HexColor("#556273"))
     canvas.setFont("Helvetica", 9)
-    canvas.drawString(doc.leftMargin, 10, "Personal expenses tracker")
-    canvas.drawRightString(A4[0] - doc.rightMargin, 10, f"Pagina {doc.page}")
+    canvas.drawString(doc.leftMargin, 10, tr(language, "pdf_footer_project"))
+    canvas.drawRightString(A4[0] - doc.rightMargin, 10, tr(language, "pdf_footer_page", page=doc.page))
     canvas.restoreState()
+
+
+# ---------------------------------------------------------------------------
+# Helpers for dynamic aggregation (used by smart export & monthly reports)
+# ---------------------------------------------------------------------------
+
+
+def _compute_category_rows_from_transactions(transactions: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    categories: dict[str, dict[str, float]] = defaultdict(lambda: {"income": 0.0, "expense": 0.0})
+    for row in transactions:
+        amount = float(row["amount"])
+        cat = str(row["category"])
+        if row["transaction_type"] == "income":
+            categories[cat]["income"] += amount
+        else:
+            categories[cat]["expense"] += amount
+    return [
+        {"category": cat, "income": data["income"], "expense": data["expense"], "balance": data["income"] - data["expense"]}
+        for cat, data in sorted(categories.items())
+    ]
+
+
+def _compute_month_rows_from_transactions(transactions: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    months: dict[str, dict[str, float]] = defaultdict(lambda: {"income": 0.0, "expense": 0.0})
+    for row in transactions:
+        amount = float(row["amount"])
+        month = str(row["transaction_date"])[:7]
+        if row["transaction_type"] == "income":
+            months[month]["income"] += amount
+        else:
+            months[month]["expense"] += amount
+    return [
+        {"month": month, "income": data["income"], "expense": data["expense"], "balance": data["income"] - data["expense"]}
+        for month, data in sorted(months.items())
+    ]
+
+
+# ---------------------------------------------------------------------------
+# JSON / YAML / HTML exporters
+# ---------------------------------------------------------------------------
+
+
+def _export_json(
+    output_file: Path,
+    transactions: list[dict[str, Any]],
+    category_rows: list[dict[str, Any]],
+    month_rows: list[dict[str, Any]],
+    language: str,
+) -> None:
+    payload = {
+        "meta": {
+            "generated_at": datetime.now().isoformat(),
+            "language": language,
+            "record_count": len(transactions),
+        },
+        "transactions": transactions,
+        "by_category": category_rows,
+        "by_month": month_rows,
+    }
+    with output_file.open("w", encoding="utf-8") as handle:
+        json.dump(payload, handle, ensure_ascii=False, indent=2, default=str)
+
+
+def _export_yaml(
+    output_file: Path,
+    transactions: list[dict[str, Any]],
+    category_rows: list[dict[str, Any]],
+    month_rows: list[dict[str, Any]],
+    language: str,
+) -> None:
+    payload = {
+        "meta": {
+            "generated_at": datetime.now().isoformat(),
+            "language": language,
+            "record_count": len(transactions),
+        },
+        "transactions": transactions,
+        "by_category": category_rows,
+        "by_month": month_rows,
+    }
+    with output_file.open("w", encoding="utf-8") as handle:
+        yaml.dump(payload, handle, allow_unicode=True, sort_keys=False, default_flow_style=False)
+
+
+def _export_html(
+    output_file: Path,
+    transactions: list[dict[str, Any]],
+    category_rows: list[dict[str, Any]],
+    month_rows: list[dict[str, Any]],
+    language: str,
+) -> None:
+    if not _PLOTLY_AVAILABLE:
+        raise RuntimeError("Plotly is required for HTML export.")
+
+    fig = make_subplots(
+        rows=2,
+        cols=1,
+        subplot_titles=(
+            tr(language, "pdf_table_category_title"),
+            tr(language, "pdf_table_month_title"),
+        ),
+        vertical_spacing=0.12,
+    )
+
+    if category_rows:
+        categories = [str(row["category"]) for row in category_rows]
+        balances = [float(row["balance"]) for row in category_rows]
+        fig.add_trace(
+            go.Bar(x=categories, y=balances, marker_color="steelblue", name=tr(language, "pdf_col_balance")),
+            row=1,
+            col=1,
+        )
+
+    if month_rows:
+        months = [str(row["month"]) for row in month_rows]
+        incomes = [float(row["income"]) for row in month_rows]
+        expenses = [float(row["expense"]) for row in month_rows]
+        fig.add_trace(
+            go.Scatter(x=months, y=incomes, mode="lines+markers", name=tr(language, "pdf_col_income")),
+            row=2,
+            col=1,
+        )
+        fig.add_trace(
+            go.Scatter(x=months, y=expenses, mode="lines+markers", name=tr(language, "pdf_col_expense")),
+            row=2,
+            col=1,
+        )
+
+    fig.update_layout(
+        title_text=tr(language, "pdf_title"),
+        height=800,
+        template="plotly_white",
+        showlegend=True,
+    )
+
+    fig.write_html(str(output_file), include_plotlyjs="cdn")
+
+
+# ---------------------------------------------------------------------------
+# Monthly consolidated PDF
+# ---------------------------------------------------------------------------
+
+
+def _export_monthly_pdf(
+    output_file: Path,
+    transactions: list[dict[str, Any]],
+    language: str,
+    year_month: str | None,
+) -> None:
+    if not transactions:
+        raise ValueError(tr(language, "warning_no_transactions_export"))
+
+    target_month = year_month
+    if target_month is None:
+        target_month = max(str(row["transaction_date"])[:7] for row in transactions)
+
+    month_transactions = [row for row in transactions if str(row["transaction_date"]).startswith(target_month)]
+    if not month_transactions:
+        raise ValueError(tr(language, "warning_no_transactions_export"))
+
+    month_category_rows = _compute_category_rows_from_transactions(month_transactions)
+    month_rows_local = _compute_month_rows_from_transactions(month_transactions)
+
+    base_styles = getSampleStyleSheet()
+    styles = _build_pdf_styles(base_styles)
+    document = SimpleDocTemplate(
+        str(output_file),
+        pagesize=A4,
+        leftMargin=28,
+        rightMargin=28,
+        topMargin=36,
+        bottomMargin=26,
+    )
+    elements: list[Any] = []
+
+    summary_metrics = _compute_summary_metrics(month_transactions, month_category_rows, month_rows_local)
+    summary_data = _build_executive_summary(summary_metrics, language)
+
+    # Custom cover for monthly report
+    elements.append(_build_monthly_cover_banner(target_month, styles, language))
+    elements.append(Spacer(1, 12))
+    elements.append(_build_kpi_table(summary_metrics, styles, language))
+    elements.append(Spacer(1, 10))
+
+    elements.append(Paragraph(tr(language, "pdf_exec_summary"), styles["section_title"]))
+    elements.append(Paragraph(summary_data, styles["body_text"]))
+    elements.append(PageBreak())
+
+    category_table_rows = [
+        [
+            escape(str(row["category"])),
+            f"{float(row['income']):.2f}",
+            f"{float(row['expense']):.2f}",
+            f"{float(row['balance']):.2f}",
+        ]
+        for row in month_category_rows
+    ]
+    _append_paginated_table(
+        elements=elements,
+        styles=styles,
+        title=tr(language, "pdf_table_category_title"),
+        header=[
+            tr(language, "excel_col_category"),
+            tr(language, "pdf_col_income"),
+            tr(language, "pdf_col_expense"),
+            tr(language, "pdf_col_balance"),
+        ],
+        rows=category_table_rows,
+        chunk_size=28,
+        col_widths=[180, 95, 95, 95],
+        text_column_indexes=[0],
+        language=language,
+    )
+
+    movement_table_rows = [
+        [
+            escape(str(row["transaction_date"])),
+            escape(_localize_transaction_type(str(row["transaction_type"]), language)),
+            escape(str(row["category"])),
+            f"{float(row['amount']):.2f}",
+            escape(str(row["description"])),
+        ]
+        for row in month_transactions
+    ]
+    _append_paginated_table(
+        elements=elements,
+        styles=styles,
+        title=tr(language, "pdf_table_transactions_title"),
+        header=[
+            tr(language, "excel_col_date"),
+            tr(language, "excel_col_type"),
+            tr(language, "excel_col_category"),
+            tr(language, "excel_col_amount"),
+            tr(language, "excel_col_description"),
+        ],
+        rows=movement_table_rows,
+        chunk_size=22,
+        col_widths=[86, 76, 102, 70, 136],
+        text_column_indexes=[0, 1, 2, 4],
+        language=language,
+    )
+
+    document.build(
+        elements,
+        onFirstPage=lambda canvas, doc: _draw_page_number(canvas, doc, language),
+        onLaterPages=lambda canvas, doc: _draw_page_number(canvas, doc, language),
+    )
+
+
+def _build_monthly_cover_banner(
+    year_month: str, styles: dict[str, ParagraphStyle], language: str
+) -> Table:
+    subtitle = (
+        tr(language, "pdf_generated", timestamp=datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+        + "<br/>"
+        + tr(language, "pdf_period", start=year_month, end=year_month)
+    )
+    content = Paragraph(
+        "<b>" + tr(language, "monthly_report_title") + "</b><br/>" + subtitle,
+        styles["cover_subtitle"],
+    )
+
+    title = Paragraph(tr(language, "monthly_report_title"), styles["cover_title"])
+    table = Table([[title], [content]], colWidths=[520])
+    table.setStyle(
+        TableStyle(
+            [
+                ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#1f3a5f")),
+                ("TEXTCOLOR", (0, 0), (-1, -1), colors.white),
+                ("LEFTPADDING", (0, 0), (-1, -1), 14),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 14),
+                ("TOPPADDING", (0, 0), (-1, -1), 10),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 10),
+            ]
+        )
+    )
+    return table
