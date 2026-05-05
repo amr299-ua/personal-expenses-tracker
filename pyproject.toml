@@ -1,0 +1,195 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "personal-expenses-tracker"
+dynamic = ["version"]
+description = "Personal Expenses Tracker - Desktop and CLI application"
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.10"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["expenses_tracker*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra -q --strict-markers"
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+]
+
+[tool.coverage.run]
+source = ["expenses_tracker"]
+omit = [
+    "*/gui.py",
+    "*/automation_dialog.py",
+    "*/chart_viewer.py",
+    "*/cloud_sync_dialog.py",
+    "*/__main__.py",
+]
+branch = true
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+    "if TYPE_CHECKING:",
+    "except ImportError",
+]
+precision = 2
+fail_under = 90
+skip_covered = false
+
+[tool.ruff]
+target-version = "py310"
+line-length = 120
+src = ["expenses_tracker", "tests"]
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # Pyflakes
+    "I",   # isort
+    "N",   # pep8-naming
+    "D",   # pydocstyle
+    "UP",  # pyupgrade
+    "B",   # flake8-bugbear
+    "C4",  # flake8-comprehensions
+    "SIM", # flake8-simplify
+    "TCH", # flake8-type-checking
+]
+ignore = [
+    "D100",  # Missing docstring in public module
+    "D104",  # Missing docstring in public package
+    "D107",  # Missing docstring in __init__
+    "D203",  # 1 blank line required before class docstring
+    "D212",  # Multi-line docstring summary should start at the first line
+    "D213",  # Multi-line docstring summary should start at the second line
+    "D401",  # First line should be in imperative mood
+    "D406",  # Section name should end with a newline
+    "D407",  # Missing dashed underline after section
+    "D413",  # Missing blank line after last section
+    "E402",  # module level import not at top of file (needed for some conditional imports)
+]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.lint.isort]
+known-first-party = ["expenses_tracker"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = [
+    "D100", "D101", "D102", "D103", "D104", "D105", "D106", "D107",
+    "D401", "D402", "D403", "D404", "D405", "D406", "D407", "D408", "D409", "D410", "D411", "D412", "D413",
+    "N802", "N803", "N806",
+    "TCH",
+]
+"expenses_tracker/gui.py" = ["ALL"]
+"expenses_tracker/automation_dialog.py" = ["ALL"]
+"expenses_tracker/chart_viewer.py" = ["ALL"]
+"expenses_tracker/cloud_sync_dialog.py" = ["ALL"]
+
+[tool.mypy]
+python_version = "3.10"
+strict = true
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+check_untyped_defs = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+show_error_codes = true
+
+[[tool.mypy.overrides]]
+module = "expenses_tracker.gui"
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = "expenses_tracker.automation_dialog"
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = "expenses_tracker.chart_viewer"
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = "expenses_tracker.cloud_sync_dialog"
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = "tests.*"
+disallow_untyped_defs = false
+disallow_incomplete_defs = false
+
+[[tool.mypy.overrides]]
+module = "matplotlib.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "numpy.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "pydantic.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "sqlalchemy.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "alembic.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "openpyxl.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "reportlab.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "plotly.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "dropbox.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "google.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "webdav3.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "arabic_reshaper.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "bidi.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "pysqlcipher3.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "schedule.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "yaml.*"
+ignore_missing_imports = true
