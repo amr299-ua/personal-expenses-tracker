@@ -5,10 +5,14 @@ import sys
 from datetime import date
 from typing import Any
 
+import logging
+
 from expenses_tracker.charts import generate_charts
 from expenses_tracker.db import ExpenseDatabase, TransactionInput
 from expenses_tracker.exporters import export_reports
 from expenses_tracker.i18n import list_languages, normalize_language, tr
+
+logger = logging.getLogger("expenses_tracker.cli")
 
 
 def _localize_transaction_type(value: str, language: str) -> str:
@@ -107,9 +111,11 @@ def main() -> int:
     language = normalize_language(args.lang)
 
     database = ExpenseDatabase(args.db_path)
+    logger.info("CLI command", extra={"command": args.command, "db_path": str(database.db_path)})
 
     if args.command == "init-db":
         database.initialize()
+        logger.info("Database initialized", extra={"path": str(database.db_path)})
         print(tr(language, "db_initialized", path=database.db_path))
         return 0
 
@@ -128,16 +134,19 @@ def main() -> int:
                 language=language,
             )
         except ValueError as error:
+            logger.warning("Add transaction failed", extra={"error": str(error)})
             print(tr(language, "error_invalid_data"))
             print(str(error))
             return 1
 
+        logger.info("Transaction added", extra={"id": transaction_id})
         print(tr(language, "transaction_saved_id", id=transaction_id))
         return 0
 
     if args.command == "list":
         database.initialize()
         rows = database.fetch_transactions(limit=args.limit)
+        logger.info("Listed transactions", extra={"count": len(rows)})
         if not rows:
             print(tr(language, "no_transactions"))
             return 0
@@ -153,6 +162,7 @@ def main() -> int:
     if args.command == "balance":
         database.initialize()
         balance = database.get_balance()
+        logger.info("Balance queried", extra={"balance": balance})
         print(tr(language, "current_balance", amount=balance))
         return 0
 
