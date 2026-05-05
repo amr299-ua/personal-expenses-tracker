@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime, timezone
-from typing import List
+from typing import Any
 
 from sqlalchemy import (
     Boolean,
@@ -35,7 +35,7 @@ class Category(Base):
     icon: Mapped[str | None] = mapped_column(String(50), nullable=True)
     color: Mapped[str | None] = mapped_column(String(7), nullable=True)  # hex color e.g. #ff0000
 
-    transactions: Mapped[List["Transaction"]] = relationship(
+    transactions: Mapped[list[Transaction]] = relationship(
         "Transaction", back_populates="category_obj", cascade="all, delete-orphan"
     )
 
@@ -65,7 +65,7 @@ class Transaction(Base):
         DateTime, nullable=False, default=lambda: datetime.now(timezone.utc)
     )
 
-    category_obj: Mapped["Category | None"] = relationship(
+    category_obj: Mapped[Category | None] = relationship(
         "Category", back_populates="transactions"
     )
 
@@ -145,14 +145,14 @@ class AutomationConfig(Base):
         return f"<AutomationConfig(id={self.id}, enabled={self.enabled}, schedule_type={self.schedule_type})>"
 
 
-def init_engine(db_path: str, cipher_key: str | None = None):
+def init_engine(db_path: str, cipher_key: str | None = None) -> Any:
     if cipher_key:
         try:
             from pysqlcipher3 import dbapi2 as sqlite
         except ImportError as exc:
             raise ImportError("pysqlcipher3 is required for encrypted databases. Install it with: pip install pysqlcipher3") from exc
 
-        def _connect():
+        def _connect() -> Any:
             conn = sqlite.connect(db_path)
             conn.execute(f"PRAGMA key = '{cipher_key}'")
             return conn
@@ -162,7 +162,7 @@ def init_engine(db_path: str, cipher_key: str | None = None):
         engine = create_engine(f"sqlite:///{db_path}", echo=False)
 
     @event.listens_for(engine, "connect")
-    def _set_sqlite_pragma(dbapi_conn, connection_record):
+    def _set_sqlite_pragma(dbapi_conn: Any, connection_record: Any) -> None:
         cursor = dbapi_conn.cursor()
         cursor.execute("PRAGMA foreign_keys=ON;")
         cursor.close()
@@ -170,5 +170,5 @@ def init_engine(db_path: str, cipher_key: str | None = None):
     return engine
 
 
-def create_session_maker(engine):
+def create_session_maker(engine: Any) -> Any:
     return sessionmaker(bind=engine)

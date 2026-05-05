@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import argparse
 import calendar
-from datetime import date, timedelta
 import json
-from pathlib import Path
 import tkinter as tk
+from collections.abc import Callable
+from datetime import date, timedelta
+from pathlib import Path
 from tkinter import messagebox, ttk
-from typing import Any, Callable
+from typing import Any
 
 import ttkbootstrap as ttkb
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
@@ -16,13 +17,13 @@ from matplotlib.figure import Figure
 from expenses_tracker.automation import ReportScheduler
 from expenses_tracker.automation_dialog import AutomationDialog
 from expenses_tracker.chart_viewer import ChartViewerDialog
+from expenses_tracker.charts import PALETTES
 from expenses_tracker.cloud_sync_dialog import CloudSyncDialog
-from expenses_tracker.charts import generate_charts, generate_budget_chart, get_palette, PALETTES
 from expenses_tracker.db import ExpenseDatabase, TransactionInput
 from expenses_tracker.exporters import (
-    export_reports,
     _compute_category_rows_from_transactions,
     _compute_month_rows_from_transactions,
+    export_reports,
 )
 from expenses_tracker.i18n import (
     format_date,
@@ -37,13 +38,13 @@ from expenses_tracker.i18n import (
     tr,
 )
 from expenses_tracker.security import (
-    apply_private_permissions,
     AuditLog as FileAuditLog,
-    BackupManager,
+)
+from expenses_tracker.security import (
     LockManager,
     SQLCipherManager,
+    apply_private_permissions,
 )
-
 
 INCOME_CATEGORY_KEYS = [
     "salary",
@@ -390,7 +391,7 @@ class LockScreenDialog(tk.Toplevel):
         self.geometry(f"+{x}+{y}")
 
     def _accept(self) -> None:
-        from expenses_tracker.security import verify_password, KeyDerivation
+        from expenses_tracker.security import KeyDerivation, verify_password
 
         pin = self.pin_var.get()
         if not pin:

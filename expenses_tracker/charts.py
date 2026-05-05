@@ -16,7 +16,6 @@ from expenses_tracker.security import apply_private_permissions
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-
 PALETTES: dict[str, dict[str, str | list[str]]] = {
     "default": {
         "income": "#2e7d32",

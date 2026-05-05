@@ -3,13 +3,13 @@ from __future__ import annotations
 import logging
 import smtplib
 import threading
-import time
+from collections.abc import Callable
 from datetime import date, datetime, timezone
 from email.mime.application import MIMEApplication
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, cast
 
 import schedule
 
@@ -162,10 +162,16 @@ class ReportScheduler:
         if not all([host, port, user, password, to_addr]):
             return
 
+        host_str = cast(str, host)
+        port_int = int(cast(str, port))
+        user_str = cast(str, user)
+        password_str = cast(str, password)
+        to_addr_str = cast(str, to_addr)
+
         msg = MIMEMultipart()
         msg["Subject"] = subject
-        msg["From"] = user
-        msg["To"] = to_addr
+        msg["From"] = user_str
+        msg["To"] = to_addr_str
         body = MIMEText(tr(self.language, "report_generated", path=filepath.name))
         msg.attach(body)
 
@@ -174,9 +180,9 @@ class ReportScheduler:
         attachment["Content-Disposition"] = f'attachment; filename="{filepath.name}"'
         msg.attach(attachment)
 
-        with smtplib.SMTP(host, int(port)) as server:
+        with smtplib.SMTP(host_str, port_int) as server:
             server.starttls()
-            server.login(user, password)
+            server.login(user_str, password_str)
             server.send_message(msg)
 
     def send_test_email(self, config: dict[str, Any]) -> bool:
@@ -191,16 +197,22 @@ class ReportScheduler:
             if not all([host, port, user, password, to_addr]):
                 return False
 
+            host_str = cast(str, host)
+            port_int = int(cast(str, port))
+            user_str = cast(str, user)
+            password_str = cast(str, password)
+            to_addr_str = cast(str, to_addr)
+
             msg = MIMEMultipart()
             msg["Subject"] = subject
-            msg["From"] = user
-            msg["To"] = to_addr
+            msg["From"] = user_str
+            msg["To"] = to_addr_str
             body = MIMEText("This is a test email from Personal Expenses Tracker.")
             msg.attach(body)
 
-            with smtplib.SMTP(host, int(port)) as server:
+            with smtplib.SMTP(host_str, port_int) as server:
                 server.starttls()
-                server.login(user, password)
+                server.login(user_str, password_str)
                 server.send_message(msg)
             return True
         except Exception:

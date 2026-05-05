@@ -3,7 +3,6 @@ from __future__ import annotations
 import tkinter as tk
 from pathlib import Path
 from tkinter import messagebox, ttk
-from typing import Any
 
 from expenses_tracker.cloud_sync import (
     CloudProvider,
@@ -13,7 +12,6 @@ from expenses_tracker.cloud_sync import (
     WebDAVProvider,
 )
 from expenses_tracker.i18n import is_rtl, normalize_language, reshape_for_rtl, tr
-from expenses_tracker.security import DatabaseEncryption
 
 
 class CloudSyncDialog(tk.Toplevel):

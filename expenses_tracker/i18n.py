@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from datetime import date, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 LOCALES_DIR = Path(__file__).parent / "locales"
 
@@ -19,7 +19,7 @@ def _load_locale_file(language: str) -> dict[str, Any] | None:
     if not path.exists():
         return None
     with open(path, encoding="utf-8") as f:
-        return json.load(f)
+        return cast(dict[str, Any], json.load(f))
 
 
 def _ensure_loaded(language: str) -> None:
@@ -133,7 +133,7 @@ def reshape_for_rtl(text: str) -> str:
         from bidi.algorithm import get_display
 
         reshaped = arabic_reshaper.reshape(text)
-        return get_display(reshaped)
+        return cast(str, get_display(reshaped))
     except Exception:
         return text
 
@@ -148,7 +148,7 @@ def format_date(language: str | None, d: date | datetime) -> str:
     month = f"{d.month:02d}"
     day = f"{d.day:02d}"
 
-    fmt = config["date_format"]
+    fmt = cast(str, config["date_format"])
     return fmt.replace("YYYY", year).replace("MM", month).replace("DD", day)
 
 

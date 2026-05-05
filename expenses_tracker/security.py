@@ -1,14 +1,13 @@
 from __future__ import annotations
 
 import base64
-import hashlib
 import json
 import os
 import secrets
 import shutil
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from cryptography.fernet import Fernet
 from cryptography.hazmat.primitives import hashes
@@ -34,7 +33,7 @@ def apply_private_permissions(path: str | Path, *, directory: bool = False) -> N
 
 
 def sanitize_spreadsheet_text(value: Any) -> str:
-    text = ILLEGAL_CHARACTERS_RE.sub("", str(value))
+    text = cast(str, ILLEGAL_CHARACTERS_RE.sub("", str(value)))
     stripped = text.lstrip()
     if stripped.startswith(SPREADSHEET_FORMULA_PREFIXES):
         return "'" + text
@@ -262,7 +261,7 @@ class AuditLog:
         if not AuditLog.LOG_FILE.exists():
             return []
         entries = []
-        with open(AuditLog.LOG_FILE, "r", encoding="utf-8") as f:
+        with open(AuditLog.LOG_FILE, encoding="utf-8") as f:
             for line in f:
                 line = line.strip()
                 if line:

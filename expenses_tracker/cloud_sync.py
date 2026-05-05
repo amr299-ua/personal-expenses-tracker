@@ -4,7 +4,7 @@ import json
 from abc import ABC, abstractmethod
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from expenses_tracker.security import DatabaseEncryption
 
@@ -65,7 +65,9 @@ class DropboxProvider(CloudProvider):
 
     def upload(self, local_path: Path, remote_path: str) -> None:
         with open(local_path, "rb") as f:
-            self.dbx.files_upload(f.read(), remote_path, mode=dropbox.files.WriteMode.overwrite)
+            self.dbx.files_upload(
+                f.read(), remote_path, mode=dropbox.files.WriteMode.overwrite  # type: ignore[name-defined]
+            )
 
     def download(self, remote_path: str, local_path: Path) -> None:
         metadata, result = self.dbx.files_download(remote_path)
@@ -84,7 +86,7 @@ class GoogleDriveProvider(CloudProvider):
 
     def __init__(self, credentials_path: str) -> None:
         from google.oauth2.credentials import Credentials
-        from googleapiclient.discovery import build
+        from googleapiclient.discovery import build  # type: ignore[import-not-found]
 
         creds = Credentials.from_authorized_user_file(credentials_path, ["https://www.googleapis.com/auth/drive"])
         self.service = build("drive", "v3", credentials=creds)
@@ -111,7 +113,7 @@ class GoogleDriveProvider(CloudProvider):
         files = results.get("files", [])
         if not files:
             raise FileNotFoundError(f"Google Drive file not found: {name}")
-        return files[0]["id"]
+        return cast(str, files[0]["id"])
 
 
 class CloudSyncManager:

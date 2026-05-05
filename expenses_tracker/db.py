@@ -1,24 +1,30 @@
 from __future__ import annotations
 
 import math
-from datetime import date
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
-from sqlalchemy import select, func, delete, update, case
+from sqlalchemy import case, delete, func, select, update
 from sqlalchemy.orm import sessionmaker
 
 from expenses_tracker.i18n import tr
-from expenses_tracker.security import apply_private_permissions, AuditLog as FileAuditLog, BackupManager
-from expenses_tracker.models import Base, Budget, Category, Transaction, AuditLogEntry, init_engine
+from expenses_tracker.models import AuditLogEntry, Base, Budget, Category, Transaction, init_engine
 from expenses_tracker.schemas import (
-    TransactionInput as _TransactionInput,
-    CategoryInput as _CategoryInput,
-    BudgetInput as _BudgetInput,
-    VALID_TRANSACTION_TYPES,
     MAX_CATEGORY_LENGTH,
     MAX_DESCRIPTION_LENGTH,
+    VALID_TRANSACTION_TYPES,
 )
+from expenses_tracker.schemas import (
+    BudgetInput as _BudgetInput,
+)
+from expenses_tracker.schemas import (
+    CategoryInput as _CategoryInput,
+)
+from expenses_tracker.schemas import (
+    TransactionInput as _TransactionInput,
+)
+from expenses_tracker.security import AuditLog as FileAuditLog
+from expenses_tracker.security import BackupManager, apply_private_permissions
 
 # Re-export constants and models for backward compatibility
 TransactionInput = _TransactionInput
@@ -44,8 +50,8 @@ class ExpenseDatabase:
 
     def _run_alembic_migrations(self) -> None:
         """Run pending Alembic migrations programmatically."""
-        from alembic.config import Config
         from alembic import command
+        from alembic.config import Config
 
         alembic_cfg = Config()
         alembic_cfg.set_main_option("script_location", "alembic")
@@ -56,7 +62,7 @@ class ExpenseDatabase:
             # If Alembic fails (e.g., no versions yet), tables already created via metadata
             pass
 
-    def _get_or_create_category(self, session, name: str, transaction_type: str) -> Category:
+    def _get_or_create_category(self, session: Any, name: str, transaction_type: str) -> Category:
         """Get existing category or create a new one."""
         category = session.execute(
             select(Category).where(Category.name == name)
@@ -69,7 +75,8 @@ class ExpenseDatabase:
             )
             session.add(category)
             session.flush()
-        return category
+        assert category is not None
+        return cast(Category, category)
 
     def add_transaction(self, transaction: TransactionInput, language: str = "en") -> int:
         self._validate_transaction(transaction, language)
@@ -155,7 +162,7 @@ class ExpenseDatabase:
                     Transaction.transaction_type == "expense"
                 )
             ).scalar()
-        return float(income) - float(expense)
+        return float(income or 0) - float(expense or 0)
 
     def get_totals_by_type(self) -> dict[str, float]:
         with self.Session() as session:
@@ -169,8 +176,8 @@ class ExpenseDatabase:
                     Transaction.transaction_type == "expense"
                 )
             ).scalar()
-        income_f = float(income)
-        expense_f = float(expense)
+        income_f = float(income or 0)
+        expense_f = float(expense or 0)
         return {
             "income": income_f,
             "expense": expense_f,
@@ -183,7 +190,7 @@ class ExpenseDatabase:
                 delete(Transaction).where(Transaction.id == transaction_id)
             )
             session.commit()
-            deleted = result.rowcount > 0
+            deleted = cast(bool, cast(Any, result).rowcount > 0)
         if deleted:
             self.log_audit(FileAuditLog.ACTION_DELETE, entity="transaction", entity_id=transaction_id)
         return deleted
@@ -306,7 +313,7 @@ class ExpenseDatabase:
                 delete(Category).where(Category.id == category_id)
             )
             session.commit()
-            return result.rowcount > 0
+            return cast(bool, cast(Any, result).rowcount > 0)
 
     # ------------------------------------------------------------------
     # Validation (kept for backward compat)
@@ -368,7 +375,7 @@ class ExpenseDatabase:
         with self.Session() as session:
             result = session.execute(delete(Budget).where(Budget.id == budget_id))
             session.commit()
-            return result.rowcount > 0
+            return cast(bool, cast(Any, result).rowcount > 0)
 
     def get_budget_vs_actual(self, month: str) -> list[dict[str, Any]]:
         with self.Session() as session:

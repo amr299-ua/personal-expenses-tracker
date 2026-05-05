@@ -1,12 +1,9 @@
 from __future__ import annotations
 
-import math
 from datetime import date
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
-
-from expenses_tracker.i18n import tr
 
 VALID_TRANSACTION_TYPES = {"income", "expense"}
 MAX_CATEGORY_LENGTH = 120

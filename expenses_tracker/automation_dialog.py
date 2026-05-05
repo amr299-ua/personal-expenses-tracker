@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import tkinter as tk
 from tkinter import messagebox, ttk
-from typing import Any, Callable
+from typing import Any
 
 from expenses_tracker.automation import ReportScheduler
 from expenses_tracker.db import ExpenseDatabase
