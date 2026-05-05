@@ -8,6 +8,8 @@ from typing import Any
 import pytest
 
 from expenses_tracker.db import ExpenseDatabase, TransactionInput
+from expenses_tracker.di import container as _di_container
+from expenses_tracker.services import ExportService, TransactionService, UIStateService
 
 
 @pytest.fixture
@@ -77,3 +79,20 @@ TRANSACTIONS: list[dict[str, Any]] = [
         "description": "Alquiler",    "created_at": "2025-02-15 08:00:00",
     },
 ]
+
+
+@pytest.fixture
+def di_container(db):
+    """Provide a clean DI container with test services registered."""
+    _di_container._registry.clear()
+    _di_container._singletons.clear()
+    from expenses_tracker.services import DatabaseService
+
+    _di_container.register("database", lambda: db, singleton=True)
+    _di_container.register("transaction_service", lambda: TransactionService(db), singleton=True)
+    _di_container.register("export_service", lambda: ExportService(), singleton=True)
+    _di_container.register("state_service", lambda: UIStateService("data/ui_state.json"), singleton=True)
+    _di_container.register("database_service", lambda: DatabaseService(db), singleton=True)
+    yield _di_container
+    _di_container._registry.clear()
+    _di_container._singletons.clear()
