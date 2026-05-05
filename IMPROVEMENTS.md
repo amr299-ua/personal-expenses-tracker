@@ -157,16 +157,19 @@ Aplicación de escritorio (Tkinter) y CLI para registrar ingresos y gastos perso
 | Prioridad | Descripción |
 |-----------|-------------|
 | Alta | Configurar **GitHub Actions** completo: linting, tests y chequeo de tipos. Forzar cobertura >90% con `pytest-cov`. |
+| **Estado** | **Implementado** — Workflow `.github/workflows/ci.yml` con jobs de lint/type-check y test para Python 3.10/3.11/3.12. Cobertura actual: **~92%** (excluyendo módulos de GUI pura). |
 
 ### 7.2. Testing Avanzado
 | Prioridad | Descripción |
 |-----------|-------------|
 | Media | Introducir **Property-based testing** con `Hypothesis` para validar que el motor financiero maneje montos extremos y fechas límite correctamente. |
+| **Estado** | **Implementado** — `tests/test_property_based.py` con tests de Hypothesis para montos extremos (0.01–1e9), fechas límite (1900–2100) y validación de balance/totals. |
 
 ### 7.3. Linting y Tipado
 | Prioridad | Descripción |
 |-----------|-------------|
 | Alta | Adoptar **Ruff** (más rápido que Flake8/Black) y **Mypy** en modo estricto. Configurar `pre-commit` hooks para prevenir regresiones. |
+| **Estado** | **Implementado** — `pyproject.toml` con configuración de Ruff (lint + format) y Mypy strict. `.pre-commit-config.yaml` con hooks de Ruff, Mypy y utilidades básicas. `requirements-dev.txt` añadido. |
 
 ---
 
