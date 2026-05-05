@@ -4,9 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from expenses_tracker.charts import generate_charts, _resolve_chart_kinds
+from expenses_tracker.charts import _resolve_chart_kinds, generate_charts
 from tests.conftest import CATEGORY_ROWS, MONTH_ROWS
-
 
 # ---------------------------------------------------------------------------
 # _resolve_chart_kinds()

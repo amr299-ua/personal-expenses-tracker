@@ -6,7 +6,6 @@ from datetime import date
 
 from expenses_tracker.gui import category_options_for_type, filter_transaction_rows, safe_parse_date
 
-
 ROWS = [
     {
         "id": 1,

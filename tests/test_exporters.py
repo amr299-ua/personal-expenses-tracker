@@ -10,7 +10,6 @@ import pytest
 from expenses_tracker.exporters import export_reports
 from tests.conftest import CATEGORY_ROWS, MONTH_ROWS, TRANSACTIONS
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

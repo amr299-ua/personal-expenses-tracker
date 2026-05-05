@@ -3,13 +3,11 @@
 from __future__ import annotations
 
 import sys
-from datetime import date
 
 import pytest
 
 from expenses_tracker import cli
-from expenses_tracker.db import ExpenseDatabase, TransactionInput
-
+from expenses_tracker.db import ExpenseDatabase
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -20,8 +18,6 @@ def run_cli(args: list[str], monkeypatch) -> tuple[int, str]:
     """Invoke cli.main() with patched argv; return (exit_code, stdout)."""
     monkeypatch.setattr(sys, "argv", ["expenses"] + args)
     captured = []
-
-    original_print = __builtins__["print"] if isinstance(__builtins__, dict) else print
 
     import builtins
     monkeypatch.setattr(builtins, "print", lambda *a, **kw: captured.append(" ".join(str(x) for x in a)))

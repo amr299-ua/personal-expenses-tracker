@@ -2,16 +2,13 @@
 
 from __future__ import annotations
 
-import json
 import os
 import stat
-from datetime import date, datetime, timezone
 from pathlib import Path
 
 import pytest
 
 from expenses_tracker.security import (
-    BACKUPS_DIR,
     AuditLog,
     BackupManager,
     DatabaseEncryption,
@@ -22,7 +19,6 @@ from expenses_tracker.security import (
     sanitize_spreadsheet_text,
     verify_password,
 )
-
 
 # ---------------------------------------------------------------------------
 # sanitize_spreadsheet_text / apply_private_permissions (existing)
@@ -125,7 +121,6 @@ class TestVerifyPassword:
 
 
 import base64  # noqa: E402
-
 
 # ---------------------------------------------------------------------------
 # LockManager
@@ -258,7 +253,6 @@ class TestDatabaseEncryption:
 
 
 from cryptography.fernet import Fernet  # noqa: E402
-
 
 # ---------------------------------------------------------------------------
 # BackupManager

@@ -7,14 +7,12 @@ from datetime import date
 
 import pytest
 
-from expenses_tracker.db import (
+from expenses_tracker.db import ExpenseDatabase, TransactionInput
+from expenses_tracker.schemas import (
     MAX_CATEGORY_LENGTH,
     MAX_DESCRIPTION_LENGTH,
     VALID_TRANSACTION_TYPES,
-    ExpenseDatabase,
-    TransactionInput,
 )
-
 
 # ---------------------------------------------------------------------------
 # initialize()
@@ -222,7 +220,7 @@ class TestFetchTransactions:
         assert set(row.keys()) == expected
 
     def test_default_limit_is_50(self, db):
-        for i in range(60):
+        for _ in range(60):
             db.add_transaction(TransactionInput(1.0, "income", "Cat", date(2025, 1, 1)))
         assert len(db.fetch_transactions()) == 50
 
@@ -408,7 +406,7 @@ class TestTransactionInput:
     def test_is_frozen(self):
         tx = TransactionInput(100.0, "income", "Salario", date(2025, 1, 1))
         with pytest.raises((AttributeError, TypeError, ValueError)):
-            tx.amount = 200.0  # type: ignore[misc]
+            tx.amount = 200.0
 
     def test_default_description_is_empty(self):
         tx = TransactionInput(100.0, "income", "Salario", date(2025, 1, 1))
@@ -421,4 +419,4 @@ class TestTransactionInput:
 
 
 def test_valid_transaction_types_contains_income_and_expense():
-    assert VALID_TRANSACTION_TYPES == {"income", "expense"}
+    assert {"income", "expense"} == VALID_TRANSACTION_TYPES

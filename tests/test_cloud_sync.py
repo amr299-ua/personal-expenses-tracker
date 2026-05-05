@@ -11,7 +11,6 @@ from expenses_tracker.cloud_sync import (
     CloudProvider,
     CloudSyncManager,
 )
-from expenses_tracker.security import DatabaseEncryption
 
 
 class FakeProvider(CloudProvider):
@@ -42,8 +41,6 @@ def fake_provider():
 
 @pytest.fixture
 def sync_manager(fake_provider):
-    key = DatabaseEncryption.encrypt_file.__wrapped__ if hasattr(DatabaseEncryption.encrypt_file, "__wrapped__") else None
-    # Use a fixed Fernet key for tests
     from cryptography.fernet import Fernet
 
     encryption_key = Fernet.generate_key()

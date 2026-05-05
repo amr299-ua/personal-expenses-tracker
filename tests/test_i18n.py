@@ -4,9 +4,6 @@ from __future__ import annotations
 
 import json
 from datetime import date, datetime
-from pathlib import Path
-
-import pytest
 
 from expenses_tracker.i18n import (
     DEFAULT_LANGUAGE,
@@ -24,7 +21,6 @@ from expenses_tracker.i18n import (
     reshape_for_rtl,
     tr,
 )
-
 
 # ---------------------------------------------------------------------------
 # normalize_language()
