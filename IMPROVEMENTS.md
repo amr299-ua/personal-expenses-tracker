@@ -179,16 +179,19 @@ Aplicación de escritorio (Tkinter) y CLI para registrar ingresos y gastos perso
 | Prioridad | Descripción |
 |-----------|-------------|
 | Alta | Migrar a **uv** o **Poetry** para una gestión de dependencias moderna, rápida y reproducible. |
+| **Estado** | **Implementado** — `uv.lock` generado con `uv`. `pyproject.toml` migrado a `hatchling` con `[dependency-groups]`. `requirements.txt` y `requirements-dev.txt` exportados via `uv export`. |
 
 ### 8.2. Refactorización Estructural
 | Prioridad | Descripción |
 |-----------|-------------|
 | Alta | Aplicar **Inyección de Dependencias** y separar `gui.py` en componentes desacoplados (Formularios, Tablas, Servicios de Negocio). |
+| **Estado** | **Implementado** — `di.py` con `Container` (singleton/factory). Servicios desacoplados: `TransactionService`, `ExportService`, `UIStateService`, `DatabaseService`. `gui.py` dividido (2260→989 líneas): `tabs/register_tab.py`, `tabs/transactions_tab.py`, `tabs/stats_tab.py`, `gui_dialogs.py`, `theme.py`, `chart_panel.py`. DI container cableado en `gui.py:main()` con 5 servicios registrados. Todas las llamadas a `self.database` en GUI reemplazadas por servicios. Tests: `test_transaction_service.py` (24), `test_di_integration.py` (4), `test_architecture.py` (14), `test_database_service.py`. |
 
 ### 8.3. Logging y Observabilidad
 | Prioridad | Descripción |
 |-----------|-------------|
 | Media | Implementar un sistema de logging estructurado con rotación de archivos y niveles de severidad configurables. |
+| **Estado** | **Implementado** — `logging_config.py` con `JSONFormatter` (JSON-Lines estructurado), `ColoredConsoleFormatter`, `RotatingFileHandler` (5 MB × 5 backups). Nivel de severidad configurable (`DEBUG`–`CRITICAL`). Usado en `__main__.py` y `cli.py`. |
 
 ---
 
