@@ -20,6 +20,8 @@ if (Test-Path release) { Remove-Item release -Recurse -Force }
   --windowed `
   --onefile `
   --name expenses-tracker.exe `
+  --hidden-import PIL._tkinter_finder `
+  --add-data "expenses_tracker/locales;expenses_tracker/locales" `
   run_gui.py
 
 New-Item -ItemType Directory -Path release | Out-Null

@@ -16,6 +16,8 @@ rm -rf build dist release
   --windowed \
   --onefile \
   --name expenses-tracker \
+  --hidden-import PIL._tkinter_finder \
+  --add-data expenses_tracker/locales:expenses_tracker/locales \
   run_gui.py
 
 mkdir -p release
