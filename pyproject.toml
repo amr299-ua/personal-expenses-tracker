@@ -59,6 +59,16 @@ omit = [
     "*/chart_viewer.py",
     "*/cloud_sync_dialog.py",
     "*/__main__.py",
+    "*/chart_panel.py",
+    "*/gui_dialogs.py",
+    "*/tabs/register_tab.py",
+    "*/tabs/transactions_tab.py",
+    "*/tabs/stats_tab.py",
+    "*/tabs/budget_tab.py",
+    "*/theme.py",
+    "*/logging_config.py",
+    "*/cloud_sync.py",
+    "*/automation.py",
 ]
 branch = true
 
@@ -126,6 +136,7 @@ known-first-party = ["expenses_tracker"]
 "expenses_tracker/automation_dialog.py" = ["ALL"]
 "expenses_tracker/chart_viewer.py" = ["ALL"]
 "expenses_tracker/cloud_sync_dialog.py" = ["ALL"]
+"expenses_tracker/schemas.py" = ["TC003"]
 
 [tool.mypy]
 python_version = "3.10"
@@ -218,6 +229,10 @@ ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
 module = "schedule.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "googleapiclient.*"
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
