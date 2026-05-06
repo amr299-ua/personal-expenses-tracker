@@ -20,10 +20,12 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship,
 
 
 class Base(DeclarativeBase):
-    pass
+    """SQLAlchemy declarative base class."""
 
 
 class Category(Base):
+    """Expense or income category."""
+
     __tablename__ = "categories"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -40,10 +42,13 @@ class Category(Base):
     )
 
     def __repr__(self) -> str:
+        """Return developer-friendly representation."""
         return f"<Category(id={self.id}, name={self.name}, type={self.transaction_type})>"
 
 
 class Transaction(Base):
+    """Financial transaction record."""
+
     __tablename__ = "transactions"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -75,10 +80,16 @@ class Transaction(Base):
     )
 
     def __repr__(self) -> str:
-        return f"<Transaction(id={self.id}, amount={self.amount}, type={self.transaction_type}, date={self.transaction_date})>"
+        """Return developer-friendly representation."""
+        return (
+            f"<Transaction(id={self.id}, amount={self.amount}, "
+            f"type={self.transaction_type}, date={self.transaction_date})>"
+        )
 
 
 class Budget(Base):
+    """Monthly budget planning entry."""
+
     __tablename__ = "budgets"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -94,10 +105,13 @@ class Budget(Base):
     )
 
     def __repr__(self) -> str:
+        """Return developer-friendly representation."""
         return f"<Budget(id={self.id}, category={self.category}, month={self.month}, planned={self.planned_amount})>"
 
 
 class AuditLogEntry(Base):
+    """Database-stored audit log record."""
+
     __tablename__ = "audit_log"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -116,10 +130,13 @@ class AuditLogEntry(Base):
     )
 
     def __repr__(self) -> str:
+        """Return developer-friendly representation."""
         return f"<AuditLogEntry(id={self.id}, action={self.action}, entity={self.entity})>"
 
 
 class ExchangeRate(Base):
+    """Currency exchange rate for a specific date."""
+
     __tablename__ = "exchange_rates"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -136,10 +153,16 @@ class ExchangeRate(Base):
     )
 
     def __repr__(self) -> str:
-        return f"<ExchangeRate(id={self.id}, {self.from_currency}->{self.to_currency}, rate={self.rate}, date={self.rate_date})>"
+        """Return developer-friendly representation."""
+        return (
+            f"<ExchangeRate(id={self.id}, {self.from_currency}->{self.to_currency}, "
+            f"rate={self.rate}, date={self.rate_date})>"
+        )
 
 
 class AutomationConfig(Base):
+    """Singleton configuration for scheduled tasks."""
+
     __tablename__ = "automation_config"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -162,19 +185,25 @@ class AutomationConfig(Base):
     )
 
     def __repr__(self) -> str:
+        """Return developer-friendly representation."""
         return f"<AutomationConfig(id={self.id}, enabled={self.enabled}, schedule_type={self.schedule_type})>"
 
 
 def init_engine(db_path: str, cipher_key: str | None = None) -> Any:
+    """Create a SQLAlchemy engine, optionally with SQLCipher encryption."""
     if cipher_key:
         try:
             from pysqlcipher3 import dbapi2 as sqlite
         except ImportError as exc:
-            raise ImportError("pysqlcipher3 is required for encrypted databases. Install it with: pip install pysqlcipher3") from exc
+            raise ImportError(
+                "pysqlcipher3 is required for encrypted databases. "
+                "Install it with: pip install pysqlcipher3"
+            ) from exc
 
         def _connect() -> Any:
             conn = sqlite.connect(db_path)
-            conn.execute(f"PRAGMA key = '{cipher_key}'")
+            safe_key = cipher_key.replace("'", "''")
+            conn.execute(f"PRAGMA key = '{safe_key}'")
             return conn
 
         engine = create_engine("sqlite://", creator=_connect, echo=False)
@@ -191,4 +220,5 @@ def init_engine(db_path: str, cipher_key: str | None = None) -> Any:
 
 
 def create_session_maker(engine: Any) -> Any:
+    """Return a SQLAlchemy session factory bound to the engine."""
     return sessionmaker(bind=engine)

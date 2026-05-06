@@ -6,8 +6,11 @@ Decouples GUI widgets from file I/O and JSON serialization details.
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
+
+logger = logging.getLogger(__name__)
 
 from expenses_tracker.security import apply_private_permissions
 
@@ -23,7 +26,10 @@ class UIStateService:
         if not self._state_file.exists():
             return {}
         try:
-            return json.loads(self._state_file.read_text(encoding="utf-8"))
+            data = json.loads(self._state_file.read_text(encoding="utf-8"))
+            if not isinstance(data, dict):
+                return {}
+            return cast("dict[str, Any]", data)
         except (OSError, json.JSONDecodeError):
             return {}
 
@@ -40,4 +46,5 @@ class UIStateService:
             temporary_file.replace(self._state_file)
             apply_private_permissions(self._state_file)
         except OSError:
+            logger.exception("Failed to write UI state to %s", self._state_file)
             return

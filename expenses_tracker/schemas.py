@@ -17,7 +17,7 @@ class TransactionInput(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    amount: float
+    amount: float = Field(gt=0)
     transaction_type: str
     category: str = Field(max_length=MAX_CATEGORY_LENGTH)
     transaction_date: date
@@ -62,7 +62,10 @@ class TransactionInput(BaseModel):
     @field_validator("currency")
     @classmethod
     def _check_currency(cls, value: str) -> str:
-        return value.strip().upper()
+        stripped = value.strip().upper()
+        if not stripped:
+            raise ValueError("Currency code cannot be empty.")
+        return stripped
 
     @field_validator("tags")
     @classmethod
@@ -75,6 +78,7 @@ class TransactionInput(BaseModel):
         return stripped
 
     def to_orm_dict(self) -> dict[str, Any]:
+        """Return a dictionary suitable for creating an ORM Transaction object."""
         return {
             "amount": self.amount,
             "transaction_type": self.transaction_type,
@@ -124,6 +128,25 @@ class CategoryInput(BaseModel):
             return None
         return stripped
 
+    def __init__(
+        self,
+        name: str,
+        transaction_type: str,
+        is_active: bool = True,
+        icon: str | None = None,
+        color: str | None = None,
+    ) -> None:
+        try:
+            super().__init__(
+                name=name,
+                transaction_type=transaction_type,
+                is_active=is_active,
+                icon=icon,
+                color=color,
+            )
+        except ValidationError as exc:
+            raise ValueError(str(exc)) from exc
+
 
 class BudgetInput(BaseModel):
     """Validated input for creating or updating a budget."""
@@ -163,6 +186,13 @@ class BudgetInput(BaseModel):
         stripped = value.strip()
         if len(stripped) != 7 or stripped[4] != "-":
             raise ValueError("Month must be in YYYY-MM format.")
+        year_part = stripped[:4]
+        month_part = stripped[5:]
+        if not year_part.isdigit() or not month_part.isdigit():
+            raise ValueError("Month must be in YYYY-MM format with numeric values.")
+        month_int = int(month_part)
+        if month_int < 1 or month_int > 12:
+            raise ValueError("Month must be between 01 and 12.")
         return stripped
 
 
@@ -179,7 +209,10 @@ class ExchangeRateInput(BaseModel):
     @field_validator("from_currency", "to_currency")
     @classmethod
     def _check_currency(cls, value: str) -> str:
-        return value.strip().upper()
+        stripped = value.strip().upper()
+        if not stripped:
+            raise ValueError("Currency code cannot be empty.")
+        return stripped
 
     @field_validator("rate")
     @classmethod
@@ -187,3 +220,20 @@ class ExchangeRateInput(BaseModel):
         if not math.isfinite(value) or value <= 0:
             raise ValueError("Rate must be a positive finite number.")
         return value
+
+    def __init__(
+        self,
+        from_currency: str,
+        to_currency: str,
+        rate: float,
+        rate_date: date,
+    ) -> None:
+        try:
+            super().__init__(
+                from_currency=from_currency,
+                to_currency=to_currency,
+                rate=rate,
+                rate_date=rate_date,
+            )
+        except ValidationError as exc:
+            raise ValueError(str(exc)) from exc

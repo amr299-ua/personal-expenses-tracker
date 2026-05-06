@@ -118,7 +118,7 @@ class TransactionService:
         """
         total = len(rows)
         total_pages = max(1, (total + page_size - 1) // page_size)
-        clamped_page = min(page, total_pages - 1)
+        clamped_page = max(0, min(page, total_pages - 1))
         start = clamped_page * page_size
         end = start + page_size
         return rows[start:end], total_pages, clamped_page

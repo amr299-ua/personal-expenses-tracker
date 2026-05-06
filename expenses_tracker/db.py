@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import logging
 import math
 from pathlib import Path
 from typing import Any, cast
 
+logger = logging.getLogger(__name__)
+
 from sqlalchemy import case, delete, func, select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 
 from expenses_tracker.i18n import tr
@@ -37,6 +41,8 @@ ExchangeRateInput = _ExchangeRateInput
 
 
 class ExpenseDatabase:
+    """Central repository for all database operations."""
+
     def __init__(self, db_path: str | Path = "data/expenses.db", cipher_key: str | None = None) -> None:
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -63,11 +69,11 @@ class ExpenseDatabase:
         try:
             command.upgrade(alembic_cfg, "head")
         except Exception:
-            # If Alembic fails (e.g., no versions yet), tables already created via metadata
-            pass
+            logger.debug("Alembic migration skipped or failed (tables may already exist)")
 
     def _get_or_create_category(self, session: Any, name: str, transaction_type: str) -> Category:
         """Get existing category or create a new one."""
+        name = name.strip()
         category = session.execute(
             select(Category).where(Category.name == name)
         ).scalar_one_or_none()
@@ -80,9 +86,10 @@ class ExpenseDatabase:
             session.add(category)
             session.flush()
         assert category is not None
-        return cast(Category, category)
+        return cast("Category", category)
 
     def add_transaction(self, transaction: TransactionInput, language: str = "en") -> int:
+        """Insert a new transaction and return its ID."""
         self._validate_transaction(transaction, language)
         with self.Session() as session:
             category_obj = self._get_or_create_category(
@@ -102,10 +109,12 @@ class ExpenseDatabase:
             session.add(tx)
             session.commit()
             tx_id = int(tx.id)
-        self.log_audit(FileAuditLog.ACTION_CREATE, entity="transaction", entity_id=tx_id, details=f"{transaction.transaction_type} {transaction.amount}")
+        details = f"{transaction.transaction_type} {transaction.amount}"
+        self.log_audit(FileAuditLog.ACTION_CREATE, entity="transaction", entity_id=tx_id, details=details)
         return tx_id
 
     def update_transaction(self, transaction_id: int, transaction: TransactionInput, language: str = "en") -> bool:
+        """Update an existing transaction by ID."""
         self._validate_transaction(transaction, language)
         with self.Session() as session:
             tx = session.get(Transaction, transaction_id)
@@ -125,10 +134,12 @@ class ExpenseDatabase:
             tx.tags = transaction.tags
             tx.recurring = transaction.recurring
             session.commit()
-        self.log_audit(FileAuditLog.ACTION_UPDATE, entity="transaction", entity_id=transaction_id, details=f"{transaction.transaction_type} {transaction.amount}")
+        details = f"{transaction.transaction_type} {transaction.amount}"
+        self.log_audit(FileAuditLog.ACTION_UPDATE, entity="transaction", entity_id=transaction_id, details=details)
         return True
 
     def fetch_transactions(self, limit: int | None = 50) -> list[dict[str, Any]]:
+        """Return recent transactions as dicts, optionally limited."""
         if limit is not None and limit <= 0:
             raise ValueError("Limit must be greater than 0.")
 
@@ -149,12 +160,16 @@ class ExpenseDatabase:
                 "category": r.category,
                 "transaction_date": r.transaction_date.isoformat(),
                 "description": r.description,
+                "currency": r.currency,
+                "tags": r.tags,
+                "recurring": r.recurring,
                 "created_at": r.created_at.isoformat() if r.created_at else "",
             }
             for r in rows
         ]
 
     def get_balance(self) -> float:
+        """Return the current balance (income minus expenses)."""
         with self.Session() as session:
             income = session.execute(
                 select(func.coalesce(func.sum(Transaction.amount), 0)).where(
@@ -169,6 +184,7 @@ class ExpenseDatabase:
         return float(income or 0) - float(expense or 0)
 
     def get_totals_by_type(self) -> dict[str, float]:
+        """Return aggregated totals for income, expense and balance."""
         with self.Session() as session:
             income = session.execute(
                 select(func.coalesce(func.sum(Transaction.amount), 0)).where(
@@ -189,17 +205,19 @@ class ExpenseDatabase:
         }
 
     def delete_transaction(self, transaction_id: int) -> bool:
+        """Delete a transaction by ID."""
         with self.Session() as session:
             result = session.execute(
                 delete(Transaction).where(Transaction.id == transaction_id)
             )
             session.commit()
-            deleted = cast(bool, cast(Any, result).rowcount > 0)
+            deleted = cast("bool", cast("Any", result).rowcount > 0)
         if deleted:
             self.log_audit(FileAuditLog.ACTION_DELETE, entity="transaction", entity_id=transaction_id)
         return deleted
 
     def get_totals_by_category(self) -> list[dict[str, Any]]:
+        """Return income, expense and balance grouped by category."""
         with self.Session() as session:
             rows = session.execute(
                 select(
@@ -229,6 +247,7 @@ class ExpenseDatabase:
         ]
 
     def get_totals_by_month(self) -> list[dict[str, Any]]:
+        """Return income, expense and balance grouped by month."""
         with self.Session() as session:
             rows = session.execute(
                 select(
@@ -262,6 +281,7 @@ class ExpenseDatabase:
     # ------------------------------------------------------------------
 
     def add_category(self, category: CategoryInput) -> int:
+        """Insert a new category and return its ID."""
         with self.Session() as session:
             cat = Category(
                 name=category.name,
@@ -275,21 +295,28 @@ class ExpenseDatabase:
             return int(cat.id)
 
     def update_category(self, category_id: int, category: CategoryInput) -> bool:
+        """Update an existing category by ID."""
         with self.Session() as session:
             cat = session.get(Category, category_id)
             if cat is None:
                 return False
+            old_name = cat.name
             cat.name = category.name
             cat.transaction_type = category.transaction_type
             cat.is_active = category.is_active
             cat.icon = category.icon
             cat.color = category.color
+            if old_name != category.name:
+                session.execute(
+                    update(Transaction).where(Transaction.category == old_name).values(category=category.name)
+                )
             session.commit()
             return True
 
     def fetch_categories(
         self, transaction_type: str | None = None, active_only: bool = True
     ) -> list[dict[str, Any]]:
+        """Return categories, optionally filtered by type and active status."""
         with self.Session() as session:
             stmt = select(Category)
             if transaction_type is not None:
@@ -312,12 +339,14 @@ class ExpenseDatabase:
         ]
 
     def delete_category(self, category_id: int) -> bool:
+        """Delete a category by ID."""
         with self.Session() as session:
-            result = session.execute(
-                delete(Category).where(Category.id == category_id)
-            )
+            cat = session.get(Category, category_id)
+            if cat is None:
+                return False
+            session.delete(cat)
             session.commit()
-            return cast(bool, cast(Any, result).rowcount > 0)
+            return True
 
     # ------------------------------------------------------------------
     # Validation (kept for backward compat)
@@ -328,6 +357,7 @@ class ExpenseDatabase:
     # ------------------------------------------------------------------
 
     def add_budget(self, budget: BudgetInput) -> int:
+        """Insert or update a budget entry and return its ID."""
         with self.Session() as session:
             existing = session.execute(
                 select(Budget).where(
@@ -345,10 +375,25 @@ class ExpenseDatabase:
                 planned_amount=budget.planned_amount,
             )
             session.add(b)
-            session.commit()
-            return int(b.id)
+            try:
+                session.commit()
+                return int(b.id)
+            except IntegrityError:
+                session.rollback()
+                existing = session.execute(
+                    select(Budget).where(
+                        Budget.category == budget.category,
+                        Budget.month == budget.month,
+                    )
+                ).scalar_one_or_none()
+                if existing is not None:
+                    existing.planned_amount = budget.planned_amount
+                    session.commit()
+                    return int(existing.id)
+                raise
 
     def update_budget(self, budget_id: int, budget: BudgetInput) -> bool:
+        """Update an existing budget by ID."""
         with self.Session() as session:
             b = session.get(Budget, budget_id)
             if b is None:
@@ -360,6 +405,7 @@ class ExpenseDatabase:
             return True
 
     def fetch_budgets(self, month: str | None = None) -> list[dict[str, Any]]:
+        """Return budgets, optionally filtered by month."""
         with self.Session() as session:
             stmt = select(Budget).order_by(Budget.month.asc(), Budget.category.asc())
             if month is not None:
@@ -376,12 +422,14 @@ class ExpenseDatabase:
         ]
 
     def delete_budget(self, budget_id: int) -> bool:
+        """Delete a budget by ID."""
         with self.Session() as session:
             result = session.execute(delete(Budget).where(Budget.id == budget_id))
             session.commit()
-            return cast(bool, cast(Any, result).rowcount > 0)
+            return cast("bool", cast("Any", result).rowcount > 0)
 
     def get_budget_vs_actual(self, month: str) -> list[dict[str, Any]]:
+        """Compare planned budgets against actual spending for a month."""
         with self.Session() as session:
             actual_rows = session.execute(
                 select(
@@ -418,6 +466,7 @@ class ExpenseDatabase:
     # ------------------------------------------------------------------
 
     def add_exchange_rate(self, rate_input: ExchangeRateInput) -> int:
+        """Insert or update an exchange rate entry."""
         with self.Session() as session:
             existing = session.execute(
                 select(ExchangeRate).where(
@@ -437,8 +486,23 @@ class ExpenseDatabase:
                 rate_date=rate_input.rate_date,
             )
             session.add(er)
-            session.commit()
-            return int(er.id)
+            try:
+                session.commit()
+                return int(er.id)
+            except IntegrityError:
+                session.rollback()
+                existing = session.execute(
+                    select(ExchangeRate).where(
+                        ExchangeRate.from_currency == rate_input.from_currency,
+                        ExchangeRate.to_currency == rate_input.to_currency,
+                        ExchangeRate.rate_date == rate_input.rate_date,
+                    )
+                ).scalar_one_or_none()
+                if existing is not None:
+                    existing.rate = rate_input.rate
+                    session.commit()
+                    return int(existing.id)
+                raise
 
     def fetch_exchange_rates(
         self,
@@ -446,6 +510,7 @@ class ExpenseDatabase:
         to_currency: str | None = None,
         rate_date: str | None = None,
     ) -> list[dict[str, Any]]:
+        """Return exchange rates, optionally filtered by currency and date."""
         with self.Session() as session:
             stmt = select(ExchangeRate).order_by(ExchangeRate.rate_date.desc(), ExchangeRate.from_currency.asc())
             if from_currency is not None:
@@ -472,6 +537,7 @@ class ExpenseDatabase:
         to_currency: str,
         rate_date: str,
     ) -> float | None:
+        """Return a single exchange rate or None if not found."""
         with self.Session() as session:
             row = session.execute(
                 select(ExchangeRate.rate).where(
@@ -482,19 +548,21 @@ class ExpenseDatabase:
             ).scalar_one_or_none()
         if row is None:
             return None
-        return float(cast(Any, row))
+        return float(cast("Any", row))
 
     def delete_exchange_rate(self, rate_id: int) -> bool:
+        """Delete an exchange rate by ID."""
         with self.Session() as session:
             result = session.execute(delete(ExchangeRate).where(ExchangeRate.id == rate_id))
             session.commit()
-            return cast(bool, cast(Any, result).rowcount > 0)
+            return cast("bool", cast("Any", result).rowcount > 0)
 
     # ------------------------------------------------------------------
     # Automation config
     # ------------------------------------------------------------------
 
     def get_automation_config(self) -> dict[str, Any]:
+        """Return the automation configuration as a dict."""
         with self.Session() as session:
             from expenses_tracker.models import AutomationConfig
             row = session.execute(select(AutomationConfig)).scalar_one_or_none()
@@ -533,6 +601,7 @@ class ExpenseDatabase:
             }
 
     def save_automation_config(self, data: dict[str, Any]) -> None:
+        """Persist the automation configuration."""
         from expenses_tracker.models import AutomationConfig
         with self.Session() as session:
             row = session.execute(select(AutomationConfig)).scalar_one_or_none()
@@ -580,6 +649,7 @@ class ExpenseDatabase:
     # ------------------------------------------------------------------
 
     def log_audit(self, action: str, entity: str = "", entity_id: int | None = None, details: str = "") -> None:
+        """Record an audit log entry in the database."""
         with self.Session() as session:
             entry = AuditLogEntry(
                 action=action,
@@ -591,6 +661,7 @@ class ExpenseDatabase:
             session.commit()
 
     def get_audit_log(self, limit: int = 100, action: str | None = None) -> list[dict[str, Any]]:
+        """Return recent audit log entries."""
         with self.Session() as session:
             stmt = select(AuditLogEntry).order_by(AuditLogEntry.timestamp.desc())
             if action is not None:
@@ -615,12 +686,15 @@ class ExpenseDatabase:
     # ------------------------------------------------------------------
 
     def create_backup(self) -> Path:
+        """Create a timestamped backup of the database."""
         FileAuditLog.log(FileAuditLog.ACTION_BACKUP, entity="database", details=f"Backup of {self.db_path}")
         return BackupManager.create_backup(self.db_path)
 
     def restore_backup(self, backup_name: str) -> Path:
+        """Restore the database from a named backup."""
         FileAuditLog.log(FileAuditLog.ACTION_RESTORE, entity="database", details=f"Restore from {backup_name}")
         return BackupManager.restore_backup(backup_name, self.db_path)
 
     def list_backups(self) -> list[dict[str, Any]]:
+        """Return a list of available backups."""
         return BackupManager.list_backups()

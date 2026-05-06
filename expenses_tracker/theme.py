@@ -79,6 +79,73 @@ class ThemeManager:
 
         style.configure("TLabel", background=self._colors["bg"], foreground=self._colors["text"])
         style.configure(
+            "TEntry",
+            fieldbackground=self._colors["input_bg"],
+            foreground=self._colors["text"],
+            insertcolor=self._colors["text"],
+            bordercolor=self._colors["line"],
+        )
+        style.configure(
+            "TCombobox",
+            fieldbackground=self._colors["input_bg"],
+            foreground=self._colors["text"],
+            background=self._colors["card"],
+            arrowcolor=self._colors["text"],
+            bordercolor=self._colors["line"],
+        )
+        style.map(
+            "TCombobox",
+            fieldbackground=[("readonly", self._colors["input_bg"])],
+            foreground=[("readonly", self._colors["text"])],
+            selectbackground=[("readonly", self._colors["select_bg"])],
+            selectforeground=[("readonly", self._colors["select_fg"])],
+        )
+        style.configure(
+            "TCheckbutton",
+            background=self._colors["bg"],
+            foreground=self._colors["text"],
+        )
+        style.map(
+            "TCheckbutton",
+            background=[("active", self._colors["bg"])],
+            foreground=[("active", self._colors["text"])],
+        )
+        style.configure(
+            "TNotebook",
+            background=self._colors["notebook_bg"],
+            borderwidth=0,
+        )
+        style.configure(
+            "TNotebook.Tab",
+            background=self._colors["notebook_bg"],
+            foreground=self._colors["muted"],
+            padding=(12, 7),
+        )
+        style.map(
+            "TNotebook.Tab",
+            background=[("selected", self._colors["card"]), ("active", self._colors["card"])],
+            foreground=[("selected", self._colors["text"]), ("active", self._colors["text"])],
+        )
+        style.configure(
+            "Treeview",
+            background=self._colors["card"],
+            fieldbackground=self._colors["card"],
+            foreground=self._colors["text"],
+            bordercolor=self._colors["line"],
+            rowheight=24,
+        )
+        style.configure(
+            "Treeview.Heading",
+            background=self._colors["notebook_bg"],
+            foreground=self._colors["text"],
+            bordercolor=self._colors["line"],
+        )
+        style.map(
+            "Treeview",
+            background=[("selected", self._colors["select_bg"])],
+            foreground=[("selected", self._colors["select_fg"])],
+        )
+        style.configure(
             "HeaderTitle.TLabel",
             background=self._colors["header"],
             foreground="#f8fafc",
