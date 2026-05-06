@@ -201,16 +201,19 @@ Aplicación de escritorio (Tkinter) y CLI para registrar ingresos y gastos perso
 | Prioridad | Descripción |
 |-----------|-------------|
 | Alta | Gestión de presupuestos mensuales por categoría con indicadores visuales de consumo (barras de progreso) y alertas de proximidad al límite. |
+| **Estado** | **Implementado** — `Budget` model en `models.py`, `BudgetInput` schema con Pydantic. `BudgetTab` en `tabs/budget_tab.py` con CRUD completo, comparación presupuesto vs real, indicadores de estado (ok/warning/over) con colores. Métodos en `TransactionService` y `db.py`. Pestaña integrada en GUI con atajo `Ctrl+4`. |
 
 ### 9.2. Inteligencia de Datos
 | Prioridad | Descripción |
 |-----------|-------------|
 | Media | **Auto-categorización:** Sugerir categoría basada en la descripción usando algoritmos de texto sencillos o modelos locales ligeros. |
+| **Estado** | **Implementado** — `CategorySuggestionService` en `services/category_suggestion_service.py` con algoritmo de frecuencia de palabras. Aprende de transacciones existentes y sugiere categoría al escribir en el campo descripción (evento `<KeyRelease>`). Tests en `test_category_suggestion.py`. |
 
 ### 9.3. Gestión Multi-moneda
 | Prioridad | Descripción |
 |-----------|-------------|
 | Media | Soporte para transacciones en monedas extranjeras con actualización automática (vía API) o manual de tasas de cambio. |
+| **Estado** | **Implementado** — `ExchangeRate` model, `ExchangeRateInput` schema. `CurrencyService` en `services/currency_service.py` con tasas automáticas vía frankfurter.app API y entrada manual. CRUD en `db.py`, migración Alembic. Campo de moneda en formulario de registro y CLI (`--currency`). Tests en `test_currency_service.py`. |
 
 ---
 
