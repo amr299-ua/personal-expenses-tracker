@@ -135,3 +135,19 @@ class TransactionService:
     def get_budget_vs_actual(self, month: str) -> list[dict[str, Any]]:
         """Return budget vs actual rows for a given month."""
         return self._database.get_budget_vs_actual(month)
+
+    def add_budget(self, budget: Any) -> int:
+        """Add or update a budget and return its ID."""
+        return self._database.add_budget(budget)
+
+    def update_budget(self, budget_id: int, budget: Any) -> bool:
+        """Update an existing budget."""
+        return self._database.update_budget(budget_id, budget)
+
+    def fetch_budgets(self, month: str | None = None) -> list[dict[str, Any]]:
+        """Return budgets, optionally filtered by month."""
+        return self._database.fetch_budgets(month=month)
+
+    def delete_budget(self, budget_id: int) -> bool:
+        """Delete a budget by ID."""
+        return self._database.delete_budget(budget_id)
