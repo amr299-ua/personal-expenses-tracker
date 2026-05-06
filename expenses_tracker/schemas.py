@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from datetime import date
 from typing import Any
 
@@ -163,3 +164,26 @@ class BudgetInput(BaseModel):
         if len(stripped) != 7 or stripped[4] != "-":
             raise ValueError("Month must be in YYYY-MM format.")
         return stripped
+
+
+class ExchangeRateInput(BaseModel):
+    """Validated input for creating or updating an exchange rate."""
+
+    model_config = ConfigDict(frozen=True)
+
+    from_currency: str = Field(min_length=1, max_length=3)
+    to_currency: str = Field(min_length=1, max_length=3)
+    rate: float = Field(gt=0)
+    rate_date: date
+
+    @field_validator("from_currency", "to_currency")
+    @classmethod
+    def _check_currency(cls, value: str) -> str:
+        return value.strip().upper()
+
+    @field_validator("rate")
+    @classmethod
+    def _check_rate(cls, value: float) -> float:
+        if not math.isfinite(value) or value <= 0:
+            raise ValueError("Rate must be a positive finite number.")
+        return value

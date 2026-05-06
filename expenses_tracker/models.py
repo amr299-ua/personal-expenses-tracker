@@ -119,6 +119,26 @@ class AuditLogEntry(Base):
         return f"<AuditLogEntry(id={self.id}, action={self.action}, entity={self.entity})>"
 
 
+class ExchangeRate(Base):
+    __tablename__ = "exchange_rates"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    from_currency: Mapped[str] = mapped_column(String(3), nullable=False)
+    to_currency: Mapped[str] = mapped_column(String(3), nullable=False)
+    rate: Mapped[float] = mapped_column(Numeric(15, 6), nullable=False)
+    rate_date: Mapped[date] = mapped_column(Date, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+
+    __table_args__ = (
+        Index("idx_exchange_rate_lookup", "from_currency", "to_currency", "rate_date"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<ExchangeRate(id={self.id}, {self.from_currency}->{self.to_currency}, rate={self.rate}, date={self.rate_date})>"
+
+
 class AutomationConfig(Base):
     __tablename__ = "automation_config"
 
