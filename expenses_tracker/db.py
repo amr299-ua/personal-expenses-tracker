@@ -8,7 +8,7 @@ from sqlalchemy import case, delete, func, select, update
 from sqlalchemy.orm import sessionmaker
 
 from expenses_tracker.i18n import tr
-from expenses_tracker.models import AuditLogEntry, Base, Budget, Category, Transaction, init_engine
+from expenses_tracker.models import AuditLogEntry, Base, Budget, Category, ExchangeRate, Transaction, init_engine
 from expenses_tracker.schemas import (
     MAX_CATEGORY_LENGTH,
     MAX_DESCRIPTION_LENGTH,
@@ -21,6 +21,9 @@ from expenses_tracker.schemas import (
     CategoryInput as _CategoryInput,
 )
 from expenses_tracker.schemas import (
+    ExchangeRateInput as _ExchangeRateInput,
+)
+from expenses_tracker.schemas import (
     TransactionInput as _TransactionInput,
 )
 from expenses_tracker.security import AuditLog as FileAuditLog
@@ -30,6 +33,7 @@ from expenses_tracker.security import BackupManager, apply_private_permissions
 TransactionInput = _TransactionInput
 CategoryInput = _CategoryInput
 BudgetInput = _BudgetInput
+ExchangeRateInput = _ExchangeRateInput
 
 
 class ExpenseDatabase:
@@ -408,6 +412,83 @@ class ExpenseDatabase:
             }
             for cat in all_categories
         ]
+
+    # ------------------------------------------------------------------
+    # ExchangeRate CRUD
+    # ------------------------------------------------------------------
+
+    def add_exchange_rate(self, rate_input: ExchangeRateInput) -> int:
+        with self.Session() as session:
+            existing = session.execute(
+                select(ExchangeRate).where(
+                    ExchangeRate.from_currency == rate_input.from_currency,
+                    ExchangeRate.to_currency == rate_input.to_currency,
+                    ExchangeRate.rate_date == rate_input.rate_date,
+                )
+            ).scalar_one_or_none()
+            if existing is not None:
+                existing.rate = rate_input.rate
+                session.commit()
+                return int(existing.id)
+            er = ExchangeRate(
+                from_currency=rate_input.from_currency,
+                to_currency=rate_input.to_currency,
+                rate=rate_input.rate,
+                rate_date=rate_input.rate_date,
+            )
+            session.add(er)
+            session.commit()
+            return int(er.id)
+
+    def fetch_exchange_rates(
+        self,
+        from_currency: str | None = None,
+        to_currency: str | None = None,
+        rate_date: str | None = None,
+    ) -> list[dict[str, Any]]:
+        with self.Session() as session:
+            stmt = select(ExchangeRate).order_by(ExchangeRate.rate_date.desc(), ExchangeRate.from_currency.asc())
+            if from_currency is not None:
+                stmt = stmt.where(ExchangeRate.from_currency == from_currency)
+            if to_currency is not None:
+                stmt = stmt.where(ExchangeRate.to_currency == to_currency)
+            if rate_date is not None:
+                stmt = stmt.where(ExchangeRate.rate_date == rate_date)
+            rows = session.execute(stmt).scalars().all()
+        return [
+            {
+                "id": r.id,
+                "from_currency": r.from_currency,
+                "to_currency": r.to_currency,
+                "rate": float(r.rate),
+                "rate_date": r.rate_date.isoformat(),
+            }
+            for r in rows
+        ]
+
+    def get_exchange_rate(
+        self,
+        from_currency: str,
+        to_currency: str,
+        rate_date: str,
+    ) -> float | None:
+        with self.Session() as session:
+            row = session.execute(
+                select(ExchangeRate.rate).where(
+                    ExchangeRate.from_currency == from_currency,
+                    ExchangeRate.to_currency == to_currency,
+                    ExchangeRate.rate_date == rate_date,
+                )
+            ).scalar_one_or_none()
+        if row is None:
+            return None
+        return float(cast(Any, row))
+
+    def delete_exchange_rate(self, rate_id: int) -> bool:
+        with self.Session() as session:
+            result = session.execute(delete(ExchangeRate).where(ExchangeRate.id == rate_id))
+            session.commit()
+            return cast(bool, cast(Any, result).rowcount > 0)
 
     # ------------------------------------------------------------------
     # Automation config
