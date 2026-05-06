@@ -346,6 +346,20 @@
     "cloud_sync_token": "Access token",
     "cloud_sync_auto": "Auto-sync on exit",
     "btn_cloud_sync": "Cloud sync",
-    "automation_backup_enabled": "Abilita backup automatici"
+    "automation_backup_enabled": "Abilita backup automatici",
+    "tab_budget": "Budgets",
+    "label_month": "Month (YYYY-MM)",
+    "label_currency": "Currency",
+    "arg_currency": "Currency code (default: USD)",
+    "budget_fill_all": "Please fill in category, month and planned amount.",
+    "budget_over": "Over budget",
+    "budget_warning": "Near limit",
+    "budget_ok": "On track",
+    "col_difference": "Difference",
+    "col_percent": "Used %",
+    "col_status": "Status",
+    "warning_select_budget": "Select a budget row first.",
+    "confirm_delete_budget": "Delete budget for {category} in {month}?",
+    "btn_save": "Save"
   }
 }

@@ -346,6 +346,20 @@
     "cloud_sync_token": "Token de acceso",
     "cloud_sync_auto": "Sincronización automática al salir",
     "btn_cloud_sync": "Sincronización en la nube",
-    "automation_backup_enabled": "Habilitar copias de seguridad automáticas"
+    "automation_backup_enabled": "Habilitar copias de seguridad automáticas",
+    "tab_budget": "Presupuestos",
+    "label_month": "Mes (AAAA-MM)",
+    "label_currency": "Moneda",
+    "arg_currency": "Código de moneda (default: USD)",
+    "budget_fill_all": "Completa categoría, mes y monto planificado.",
+    "budget_over": "Sobre presupuesto",
+    "budget_warning": "Cerca del límite",
+    "budget_ok": "Dentro del plan",
+    "col_difference": "Diferencia",
+    "col_percent": "% Usado",
+    "col_status": "Estado",
+    "warning_select_budget": "Selecciona un presupuesto primero.",
+    "confirm_delete_budget": "¿Eliminar presupuesto de {category} en {month}?",
+    "btn_save": "Guardar"
   }
 }
