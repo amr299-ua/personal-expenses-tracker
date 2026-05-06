@@ -36,8 +36,15 @@ from expenses_tracker.security import (
     LockManager,
     SQLCipherManager,
 )
-from expenses_tracker.services import DatabaseService, ExportService, TransactionService, UIStateService
-from expenses_tracker.tabs import RegisterTab, StatsTab, TransactionsTab
+from expenses_tracker.services import (
+    CategorySuggestionService,
+    CurrencyService,
+    DatabaseService,
+    ExportService,
+    TransactionService,
+    UIStateService,
+)
+from expenses_tracker.tabs import BudgetTab, RegisterTab, StatsTab, TransactionsTab
 
 logger = logging.getLogger("expenses_tracker.gui")
 
@@ -103,6 +110,16 @@ class ExpensesApp(tk.Tk):
         self.database_service = _resolve_or_create(
             "database_service", lambda: DatabaseService(self.database)
         )
+        self.currency_service = _resolve_or_create(
+            "currency_service", lambda: CurrencyService(self.database)
+        )
+        self.category_suggestion_service = _resolve_or_create(
+            "category_suggestion_service", lambda: CategorySuggestionService()
+        )
+
+        # Load base currency from state
+        base_currency = str(self._state.get("base_currency", "USD"))
+        self.currency_service.set_base_currency(base_currency)
 
         self.scheduler = ReportScheduler(
             database=self.database,
@@ -127,6 +144,7 @@ class ExpensesApp(tk.Tk):
         self.amount_var = tk.StringVar()
         self.category_var = tk.StringVar()
         self.date_var = tk.StringVar(value=date.today().isoformat())
+        self.currency_var = tk.StringVar(value=str(self._state.get("currency", "USD")))
         self.editing_transaction_id: int | None = None
         self.save_button_var = tk.StringVar()
 
@@ -361,15 +379,18 @@ class ExpensesApp(tk.Tk):
         tab_register = ttk.Frame(notebook, padding=12, style="App.TFrame")
         tab_transactions = ttk.Frame(notebook, padding=12, style="App.TFrame")
         tab_stats = ttk.Frame(notebook, padding=12, style="App.TFrame")
+        tab_budget = ttk.Frame(notebook, padding=12, style="App.TFrame")
 
         notebook.add(tab_register, text=tr(self.language, "tab_register"))
         notebook.add(tab_transactions, text=tr(self.language, "tab_transactions"))
         notebook.add(tab_stats, text=tr(self.language, "tab_stats"))
+        notebook.add(tab_budget, text=tr(self.language, "tab_budget"))
         self._tab_register = tab_register
 
         self._build_register_tab(tab_register)
         self._build_transactions_tab(tab_transactions)
         self._build_stats_tab(tab_stats)
+        self._build_budget_tab(tab_budget)
 
     def _rtl_text(self, text: str) -> str:
         if is_rtl(self.language):
@@ -410,6 +431,8 @@ class ExpensesApp(tk.Tk):
         self._transactions_tab = TransactionsTab(parent, self)
     def _build_stats_tab(self, parent: ttk.Frame) -> None:
         self._stats_tab = StatsTab(parent, self)
+    def _build_budget_tab(self, parent: ttk.Frame) -> None:
+        self._budget_tab = BudgetTab(parent, self)
 
     def _on_language_change(self) -> None:
         selected_display = self.language_var.get().strip()
@@ -449,6 +472,8 @@ class ExpensesApp(tk.Tk):
     def _refresh_all(self) -> None:
         self._transactions_tab._load_transactions()
         self._stats_tab._load_stats()
+        if hasattr(self, "_budget_tab"):
+            self._budget_tab._load_budgets()
 
     def _open_calendar_for_var(
         self,
@@ -562,6 +587,8 @@ class ExpensesApp(tk.Tk):
             "filter_to": self.filter_to_var.get(),
             "sort_column": self.sort_column,
             "sort_desc": self.sort_desc,
+            "base_currency": self.currency_service.base_currency,
+            "currency": self.currency_var.get(),
         }
         self.state_service.write(data)
 
@@ -693,6 +720,7 @@ class ExpensesApp(tk.Tk):
         self.bind_all("<Control-1>", lambda _event: self._select_tab(0))
         self.bind_all("<Control-2>", lambda _event: self._select_tab(1))
         self.bind_all("<Control-3>", lambda _event: self._select_tab(2))
+        self.bind_all("<Control-4>", lambda _event: self._select_tab(3))
 
     def _shortcut_new_transaction(self) -> None:
         focused = self.focus_get()
@@ -966,6 +994,8 @@ def main(argv: list[str] | None = None) -> int:
         _di_container.register("export_service", lambda: ExportService(), singleton=True)
         _di_container.register("state_service", lambda: UIStateService("data/ui_state.json"), singleton=True)
         _di_container.register("database_service", lambda: DatabaseService(database), singleton=True)
+        _di_container.register("currency_service", lambda: CurrencyService(database), singleton=True)
+        _di_container.register("category_suggestion_service", lambda: CategorySuggestionService(), singleton=True)
 
     try:
         app = ExpensesApp(
