@@ -40,6 +40,8 @@ class RegisterTab:
         lbl_category.grid(row=0, column=2, sticky=label_sticky, pady=4)
         lbl_date = ttk.Label(form, text=self.app._rtl_text(tr(self.app.language, "label_date")))
         lbl_date.grid(row=0, column=3, sticky=label_sticky, pady=4)
+        lbl_currency = ttk.Label(form, text=self.app._rtl_text(tr(self.app.language, "label_currency")))
+        lbl_currency.grid(row=0, column=4, sticky=label_sticky, pady=4)
 
         type_box = ttk.Combobox(
             form,
@@ -80,7 +82,7 @@ class RegisterTab:
         date_field.grid(row=1, column=3, sticky="we", padx=(0, 10), pady=(0, 2))
         date_justify = "right" if is_rtl(self.app.language) else "left"
         self.app.date_entry = ttk.Entry(
-            date_field, textvariable=self.app.date_var, width=18, justify=date_justify  # type: ignore[arg-type]
+            date_field, textvariable=self.app.date_var, width=14, justify=date_justify  # type: ignore[arg-type]
         )
         self.app.date_entry.pack(side="left", fill="x", expand=True)
         self.app._date_indicator = ttk.Label(date_field, text="", width=2)
@@ -95,6 +97,18 @@ class RegisterTab:
             ),
         )
         btn_calendar.pack(side="left", padx=(4, 0))
+
+        currency_field = ttk.Frame(form)
+        currency_field.grid(row=1, column=4, sticky="we", padx=(0, 10), pady=(0, 2))
+        self.app.currency_box = ttk.Combobox(
+            currency_field,
+            textvariable=self.app.currency_var,
+            values=["USD", "EUR", "GBP", "JPY", "MXN", "CAD", "AUD", "CHF", "CNY", "ARS", "BRL"],
+            state="readonly",
+            width=10,
+        )
+        self.app.currency_box.pack(side="left", fill="x", expand=True)
+        self.app._apply_rtl_to_widget(self.app.currency_box)
 
         lbl_description = ttk.Label(form, text=self.app._rtl_text(tr(self.app.language, "label_description")))
         lbl_description.grid(row=2, column=0, sticky=label_sticky, pady=4)
@@ -115,11 +129,11 @@ class RegisterTab:
             self.app.description_text.tag_configure("rtl", justify="right")
             self.app.description_text.insert("1.0", "")
             self.app.description_text.tag_add("rtl", "1.0", "end")
-        self.app.description_text.grid(row=3, column=0, columnspan=4, sticky="we", pady=(0, 8))
+        self.app.description_text.grid(row=3, column=0, columnspan=5, sticky="we", pady=(0, 8))
 
         actions = ttk.Frame(form, style="Card.TFrame")
         actions_sticky = "w" if is_rtl(self.app.language) else "e"
-        actions.grid(row=4, column=0, columnspan=4, sticky=actions_sticky)
+        actions.grid(row=4, column=0, columnspan=5, sticky=actions_sticky)
 
         btn_save = ttk.Button(
             actions,
@@ -139,15 +153,23 @@ class RegisterTab:
         btn_clear.pack(side="left", padx=4)
         self.app._apply_rtl_to_widget(btn_clear)
 
-        for column_index in range(4):
+        for column_index in range(5):
             form.columnconfigure(column_index, weight=1)
 
         self._on_register_type_changed()
         self._update_save_button_text()
 
+        # Learn from existing transactions for auto-categorization
+        try:
+            transactions = self.app.transaction_service.fetch_all()
+            self.app.category_suggestion_service.learn_from_transactions(transactions)
+        except Exception:
+            pass
+
         self.app.amount_var.trace_add("write", self._validate_amount)
         self.app.date_var.trace_add("write", self._validate_date)
         self.app.category_var.trace_add("write", self._validate_category)
+        self.app.description_text.bind("<KeyRelease>", lambda _event: self._suggest_category())
 
     # ------------------------------------------------------------------
     # Form logic
@@ -192,6 +214,19 @@ class RegisterTab:
         self._clear_form(keep_date=True)
         self.app._refresh_all()
 
+    def _suggest_category(self) -> None:
+        description = self.app.description_text.get("1.0", "end").strip()
+        if not description or len(description) < 3:
+            return
+        suggestion = self.app.category_suggestion_service.suggest(description)
+        if suggestion is None:
+            return
+        options = list(self.app.category_box["values"] or [])
+        if suggestion in options:
+            current = self.app.category_var.get().strip()
+            if not current or current == options[0]:
+                self.app.category_var.set(suggestion)
+
     def _transaction_from_form(self) -> TransactionInput:
         return TransactionInput(
             amount=float(self.app.amount_var.get().strip()),
@@ -199,6 +234,7 @@ class RegisterTab:
             category=self.app.category_var.get().strip(),
             transaction_date=date.fromisoformat(self.app.date_var.get().strip()),
             description=self.app.description_text.get("1.0", "end").strip(),
+            currency=self.app.currency_var.get().strip().upper() or "USD",
         )
 
     def _clear_form(self, keep_date: bool = False) -> None:
