@@ -62,21 +62,21 @@ class TestReportSchedulerLifecycle:
         assert not scheduler._thread.is_alive()
 
     def test_update_schedule_clears_previous_jobs(self, scheduler: ReportScheduler):
-        with patch("expenses_tracker.automation.schedule") as mock_schedule:
-            scheduler.update_schedule(
-                {
-                    "enabled": True,
-                    "schedule_type": "daily",
-                    "schedule_time": "08:00",
-                }
-            )
-            mock_schedule.clear.assert_called_once()
+        scheduler._scheduler = MagicMock()
+        scheduler.update_schedule(
+            {
+                "enabled": True,
+                "schedule_type": "daily",
+                "schedule_time": "08:00",
+            }
+        )
+        scheduler._scheduler.clear.assert_called_once()
 
     def test_update_schedule_disabled_does_not_add_jobs(self, scheduler: ReportScheduler):
-        with patch("expenses_tracker.automation.schedule") as mock_schedule:
-            scheduler.update_schedule({"enabled": False})
-            mock_schedule.clear.assert_called_once()
-            assert not mock_schedule.every.called
+        scheduler._scheduler = MagicMock()
+        scheduler.update_schedule({"enabled": False})
+        scheduler._scheduler.clear.assert_called_once()
+        assert not scheduler._scheduler.every.called
 
 
 class TestEmailSending:
@@ -134,13 +134,13 @@ class TestSchedulerIntegration:
         assert len(db.list_backups()) >= 1
 
     def test_update_schedule_adds_backup_job_when_backup_enabled(self, scheduler: ReportScheduler):
-        with patch("expenses_tracker.automation.schedule") as mock_schedule:
-            scheduler.update_schedule(
-                {
-                    "enabled": True,
-                    "schedule_type": "daily",
-                    "schedule_time": "08:00",
-                    "backup_enabled": True,
-                }
-            )
-            assert mock_schedule.every().day.at().do.call_count >= 2  # report + backup
+        scheduler._scheduler = MagicMock()
+        scheduler.update_schedule(
+            {
+                "enabled": True,
+                "schedule_type": "daily",
+                "schedule_time": "08:00",
+                "backup_enabled": True,
+            }
+        )
+        assert scheduler._scheduler.every().day.at().do.call_count >= 2  # report + backup

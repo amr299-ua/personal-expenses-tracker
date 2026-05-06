@@ -81,9 +81,30 @@ class TestTransactionServiceAggregation:
 
 class TestTransactionServiceFiltering:
     ROWS = [
-        {"id": 1, "transaction_date": "2025-01-01", "transaction_type": "income", "category": "Salary", "amount": 1000.0, "description": "Pay"},
-        {"id": 2, "transaction_date": "2025-01-02", "transaction_type": "expense", "category": "Food", "amount": 20.0, "description": "Lunch"},
-        {"id": 3, "transaction_date": "2025-02-01", "transaction_type": "expense", "category": "Rent", "amount": 500.0, "description": "Home"},
+        {
+            "id": 1,
+            "transaction_date": "2025-01-01",
+            "transaction_type": "income",
+            "category": "Salary",
+            "amount": 1000.0,
+            "description": "Pay",
+        },
+        {
+            "id": 2,
+            "transaction_date": "2025-01-02",
+            "transaction_type": "expense",
+            "category": "Food",
+            "amount": 20.0,
+            "description": "Lunch",
+        },
+        {
+            "id": 3,
+            "transaction_date": "2025-02-01",
+            "transaction_type": "expense",
+            "category": "Rent",
+            "amount": 500.0,
+            "description": "Home",
+        },
     ]
 
     def test_filter_by_type(self):
@@ -109,9 +130,30 @@ class TestTransactionServiceFiltering:
 
 class TestTransactionServiceSorting:
     ROWS = [
-        {"id": 3, "transaction_date": "2025-01-01", "transaction_type": "expense", "category": "Z", "amount": 10.0, "description": "B"},
-        {"id": 1, "transaction_date": "2025-01-02", "transaction_type": "income", "category": "A", "amount": 100.0, "description": "A"},
-        {"id": 2, "transaction_date": "2025-01-03", "transaction_type": "expense", "category": "M", "amount": 50.0, "description": "C"},
+        {
+            "id": 3,
+            "transaction_date": "2025-01-01",
+            "transaction_type": "expense",
+            "category": "Z",
+            "amount": 10.0,
+            "description": "B",
+        },
+        {
+            "id": 1,
+            "transaction_date": "2025-01-02",
+            "transaction_type": "income",
+            "category": "A",
+            "amount": 100.0,
+            "description": "A",
+        },
+        {
+            "id": 2,
+            "transaction_date": "2025-01-03",
+            "transaction_type": "expense",
+            "category": "M",
+            "amount": 50.0,
+            "description": "C",
+        },
     ]
 
     def test_sort_by_id_ascending(self):
@@ -136,18 +178,18 @@ class TestTransactionServiceSorting:
 
 
 class TestTransactionServicePagination:
-    ROWS = list(range(25))
+    ROWS = [{"id": i, "amount": 10.0} for i in range(25)]
 
     def test_paginate_first_page(self):
         rows, total_pages, page = TransactionService.paginate(self.ROWS, page=0, page_size=10)
-        assert rows == list(range(10))
+        assert rows == [{"id": i, "amount": 10.0} for i in range(10)]
         assert total_pages == 3
         assert page == 0
 
     def test_paginate_clamps_page(self):
         rows, total_pages, page = TransactionService.paginate(self.ROWS, page=99, page_size=10)
         assert page == 2
-        assert rows == list(range(20, 25))
+        assert rows == [{"id": i, "amount": 10.0} for i in range(20, 25)]
 
     def test_paginate_empty(self):
         rows, total_pages, page = TransactionService.paginate([], page=0, page_size=10)

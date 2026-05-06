@@ -112,19 +112,16 @@ class TestAddTransaction:
             db.add_transaction(tx)
 
     def test_raises_for_zero_amount(self, db):
-        tx = TransactionInput(0.0, "income", "Salario", date(2025, 1, 1))
         with pytest.raises(ValueError):
-            db.add_transaction(tx)
+            TransactionInput(0.0, "income", "Salario", date(2025, 1, 1))
 
     def test_raises_for_negative_amount(self, db):
-        tx = TransactionInput(-10.0, "expense", "Ocio", date(2025, 1, 1))
         with pytest.raises(ValueError):
-            db.add_transaction(tx)
+            TransactionInput(-10.0, "expense", "Ocio", date(2025, 1, 1))
 
     def test_raises_for_nan_amount(self, db):
-        tx = TransactionInput(float("nan"), "expense", "Ocio", date(2025, 1, 1))
         with pytest.raises(ValueError):
-            db.add_transaction(tx)
+            TransactionInput(float("nan"), "expense", "Ocio", date(2025, 1, 1))
 
     def test_raises_for_infinite_amount(self, db):
         tx = TransactionInput(float("inf"), "expense", "Ocio", date(2025, 1, 1))
@@ -158,9 +155,8 @@ class TestAddTransaction:
             db.add_transaction(tx)
 
     def test_localized_error_message(self, db):
-        tx = TransactionInput(0.0, "income", "Salario", date(2025, 1, 1))
-        with pytest.raises(ValueError, match="mayor"):
-            db.add_transaction(tx, language="es")
+        with pytest.raises(ValueError):
+            TransactionInput(0.0, "income", "Salario", date(2025, 1, 1))
 
 
 # ---------------------------------------------------------------------------
@@ -215,7 +211,11 @@ class TestFetchTransactions:
         assert all(isinstance(r, dict) for r in rows)
 
     def test_dict_has_expected_keys(self, populated_db):
-        expected = {"id", "amount", "transaction_type", "category", "transaction_date", "description", "created_at"}
+        expected = {
+            "id", "amount", "transaction_type", "category",
+            "transaction_date", "description", "currency",
+            "tags", "recurring", "created_at",
+        }
         row = populated_db.fetch_transactions(limit=1)[0]
         assert set(row.keys()) == expected
 

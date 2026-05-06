@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from expenses_tracker.di import Container, container as global_container
+from expenses_tracker.di import Container
+from expenses_tracker.di import container as global_container
 from expenses_tracker.services import ExportService, TransactionService, UIStateService
 
 

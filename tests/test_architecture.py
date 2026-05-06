@@ -11,13 +11,12 @@ import pytest
 
 from expenses_tracker.di import Container
 from expenses_tracker.logging_config import configure_logging, get_logger
-from expenses_tracker.services import ExportService, TransactionService, UIStateService
+from expenses_tracker.services import ExportService, UIStateService
 from expenses_tracker.utils import (
     category_options_for_type,
     filter_transaction_rows,
     safe_parse_date,
 )
-
 
 # ---------------------------------------------------------------------------
 # DI Container
@@ -167,7 +166,14 @@ def test_category_options_for_type_income():
 
 def test_filter_transaction_rows_by_search():
     rows = [
-        {"id": 1, "transaction_date": "2026-01-01", "transaction_type": "income", "category": "X", "amount": 1, "description": "hello"},
+        {
+            "id": 1,
+            "transaction_date": "2026-01-01",
+            "transaction_type": "income",
+            "category": "X",
+            "amount": 1,
+            "description": "hello",
+        },
     ]
     result = filter_transaction_rows(rows, "hello", "", "All", "All", None, None, {})
     assert len(result) == 1

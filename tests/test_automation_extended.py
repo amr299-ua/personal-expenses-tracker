@@ -20,31 +20,31 @@ def scheduler(db):
 
 class TestSchedulerSchedules:
     def test_update_schedule_weekly(self, scheduler):
-        with patch("expenses_tracker.automation.schedule") as mock_schedule:
-            scheduler.update_schedule({
-                "enabled": True,
-                "schedule_type": "weekly",
-                "schedule_day": 1,
-                "schedule_time": "09:00",
-            })
-            mock_schedule.clear.assert_called_once()
-            assert mock_schedule.every().monday.at.called
+        scheduler._scheduler = MagicMock()
+        scheduler.update_schedule({
+            "enabled": True,
+            "schedule_type": "weekly",
+            "schedule_day": 1,
+            "schedule_time": "09:00",
+        })
+        scheduler._scheduler.clear.assert_called_once()
+        assert scheduler._scheduler.every().monday.at.called
 
     def test_update_schedule_monthly(self, scheduler):
-        with patch("expenses_tracker.automation.schedule") as mock_schedule:
-            scheduler.update_schedule({
-                "enabled": True,
-                "schedule_type": "monthly",
-                "schedule_day": 15,
-                "schedule_time": "10:00",
-            })
-            mock_schedule.clear.assert_called_once()
-            assert mock_schedule.every().day.at.called
+        scheduler._scheduler = MagicMock()
+        scheduler.update_schedule({
+            "enabled": True,
+            "schedule_type": "monthly",
+            "schedule_day": 15,
+            "schedule_time": "10:00",
+        })
+        scheduler._scheduler.clear.assert_called_once()
+        assert scheduler._scheduler.every().day.at.called
 
     def test_update_schedule_none_config(self, scheduler):
-        with patch("expenses_tracker.automation.schedule") as mock_schedule:
-            scheduler.update_schedule(None)
-            mock_schedule.clear.assert_called_once()
+        scheduler._scheduler = MagicMock()
+        scheduler.update_schedule(None)
+        scheduler._scheduler.clear.assert_called_once()
 
     def test_run_monthly_report_on_wrong_day_does_nothing(self, scheduler, db):
         db.save_automation_config({"enabled": True, "export_format": "csv"})

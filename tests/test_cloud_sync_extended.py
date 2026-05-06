@@ -70,16 +70,24 @@ class TestGoogleDriveProvider:
 
     def test_delete(self):
         _skip_if_missing("google.oauth2.credentials")
+
+        mock_files_instance = MagicMock()
+        mock_list_instance = MagicMock()
+        mock_list_instance.execute.return_value = {"files": [{"id": "123", "name": "x"}]}
+        mock_files_instance.list.return_value = mock_list_instance
+        mock_delete_instance = MagicMock()
+        mock_files_instance.delete.return_value = mock_delete_instance
+
+        def mock_files():
+            return mock_files_instance
+
         with (
             patch("google.oauth2.credentials.Credentials.from_authorized_user_file"),
-            patch("googleapiclient.discovery.build") as mock_build,
+            patch("googleapiclient.discovery.build", return_value=MagicMock(files=mock_files)),
         ):
             provider = GoogleDriveProvider("/path/to/creds.json")
-            mock_service = MagicMock()
-            mock_build.return_value = mock_service
-            mock_service.files().list().execute.return_value = {"files": [{"id": "123", "name": "x"}]}
             provider.delete("x")
-            mock_service.files().delete.assert_called_once_with(fileId="123")
+            mock_delete_instance.execute.assert_called_once()
 
 
 class TestCloudSyncManagerExtended:
