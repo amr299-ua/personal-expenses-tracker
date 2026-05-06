@@ -17,6 +17,11 @@ from expenses_tracker.cloud_sync_dialog import CloudSyncDialog
 from expenses_tracker.db import ExpenseDatabase
 from expenses_tracker.di import container as _di_container
 from expenses_tracker.gui_dialogs import CalendarDialog, ChartTypeDialog, LockScreenDialog
+from expenses_tracker.exporters import (
+    _compute_category_rows_from_transactions,
+    _compute_month_rows_from_transactions,
+    export_reports,
+)
 from expenses_tracker.i18n import (
     format_date,
     format_number,
@@ -94,6 +99,8 @@ class ExpensesApp(tk.Tk):
         if palette not in PALETTES:
             palette = "default"
         self.theme_manager = ThemeManager(theme_mode=theme_mode, palette=palette)
+        self.theme_mode = theme_mode
+        self.palette = palette
         self.theme_manager.setup(self)
 
         self.database = database or _resolve_or_create(
@@ -175,6 +182,26 @@ class ExpensesApp(tk.Tk):
         self._container: ttk.Frame | None = None
         self._notebook: ttk.Notebook | None = None
         self._tab_register: ttk.Frame | None = None
+        self._language_display_to_code: dict[str, str] = {}
+        self._type_display_to_db: dict[str, str] = {}
+        self._type_db_to_display: dict[str, str] = {}
+        self._filter_display_to_key: dict[str, str] = {}
+        self._filter_key_to_display: dict[str, str] = {}
+        self._column_titles: dict[str, str] = {}
+        self._all_label = ""
+        self._register_tab: RegisterTab | None = None
+        self._transactions_tab: TransactionsTab | None = None
+        self._stats_tab: StatsTab | None = None
+        self._budget_tab: BudgetTab | None = None
+        self._i18n_widgets: list[tuple[tk.Misc, str]] = []
+        self.register_type_key: str = "expense"
+        self.filter_type_key: str = "all"
+        self._current_page: int = 0
+        self._total_pages: int = 1
+        self._page_size: int = 50
+        self.sort_column: str = "date"
+        self.sort_desc: bool = True
+        self.editing_transaction_id: int | None = None
         self._sync_language_maps()
         self._build_ui()
         self._setup_shortcuts()
@@ -211,7 +238,6 @@ class ExpensesApp(tk.Tk):
         self.balance_var.set(tr(self.language, "balance_label", amount=format_number(self.language, self._last_totals["balance"])))
         self.income_var.set(tr(self.language, "income_total_label", amount=format_number(self.language, self._last_totals["income"])))
         self.expense_var.set(tr(self.language, "expense_total_label", amount=format_number(self.language, self._last_totals["expense"])))
-        self._update_save_button_text()
 
     def _chart_type_options(self) -> list[tuple[str, str]]:
         return [
@@ -229,6 +255,7 @@ class ExpensesApp(tk.Tk):
     def _build_ui(self) -> None:
         if self._container is not None:
             self._container.destroy()
+        self._i18n_widgets = []
 
         self.title(tr(self.language, "app_title"))
         self._container = ttk.Frame(self, padding=16, style="App.TFrame")
@@ -244,19 +271,22 @@ class ExpensesApp(tk.Tk):
         heading = ttk.Frame(header, style="Header.TFrame")
         heading.pack(side=heading_side, fill="x", expand=True)
 
-        ttk.Label(heading, text=self._rtl_text(tr(self.language, "header_title")), style="HeaderTitle.TLabel").pack(anchor=heading_anchor)
-        ttk.Label(
+        header_title = ttk.Label(heading, style="HeaderTitle.TLabel")
+        self._set_i18n_text(header_title, "header_title")
+        header_title.pack(anchor=heading_anchor)
+        header_subtitle = ttk.Label(
             heading,
-            text=self._rtl_text(tr(self.language, "header_subtitle")),
             style="HeaderSubtitle.TLabel",
-        ).pack(anchor=heading_anchor, pady=(2, 0))
+        )
+        self._set_i18n_text(header_subtitle, "header_subtitle")
+        header_subtitle.pack(anchor=heading_anchor, pady=(2, 0))
 
         buttons = ttk.Frame(header, style="Header.TFrame")
         buttons.pack(side=buttons_side)
 
-        ttk.Label(buttons, text=self._rtl_text(tr(self.language, "label_language")), style="HeaderSubtitle.TLabel").pack(
-            side="left", padx=(0, 6)
-        )
+        language_label_widget = ttk.Label(buttons, style="HeaderSubtitle.TLabel")
+        self._set_i18n_text(language_label_widget, "label_language")
+        language_label_widget.pack(side="left", padx=(0, 6))
         language_box = ttk.Combobox(
             buttons,
             textvariable=self.language_var,
@@ -267,8 +297,9 @@ class ExpensesApp(tk.Tk):
         language_box.pack(side="left", padx=3)
         language_box.bind("<<ComboboxSelected>>", lambda _event: self._on_language_change())
         self._apply_rtl_to_widget(language_box)
+        self.language_box = language_box
 
-        self.theme_button = ttk.Button(buttons, style="Ghost.TButton", command=self._toggle_theme)
+        self.theme_button = ttk.Button(buttons, text=tr(self.language, "btn_dark_mode"), style="Ghost.TButton", command=self._toggle_theme)
         self.theme_button.pack(side="left", padx=3)
         self._update_theme_button_text()
 
@@ -283,54 +314,58 @@ class ExpensesApp(tk.Tk):
         palette_box.pack(side="left", padx=3)
         palette_box.bind("<<ComboboxSelected>>", lambda _event: self._on_palette_change())
         self._apply_rtl_to_widget(palette_box)
+        self.palette_box = palette_box
 
-        btn_refresh = ttk.Button(buttons, text=tr(self.language, "btn_refresh"), style="Ghost.TButton", command=self._refresh_all)
+        btn_refresh = ttk.Button(buttons, style="Ghost.TButton", command=self._refresh_all)
+        self._set_i18n_text(btn_refresh, "btn_refresh")
         btn_refresh.pack(side="left", padx=3)
         self._apply_rtl_to_widget(btn_refresh)
 
         btn_charts = ttk.Button(
             buttons,
-            text=tr(self.language, "btn_make_charts"),
             style="Ghost.TButton",
             command=self._generate_charts,
         )
+        self._set_i18n_text(btn_charts, "btn_make_charts")
         btn_charts.pack(side="left", padx=3)
         self._apply_rtl_to_widget(btn_charts)
 
         btn_automation = ttk.Button(
             buttons,
-            text=tr(self.language, "btn_automation"),
             style="Ghost.TButton",
             command=self._open_automation_dialog,
         )
+        self._set_i18n_text(btn_automation, "btn_automation")
         btn_automation.pack(side="left", padx=3)
         self._apply_rtl_to_widget(btn_automation)
 
-        lock_label = tr(self.language, "btn_set_lock") if not LockManager.is_lock_set() else tr(self.language, "btn_remove_lock")
-        btn_lock = ttk.Button(buttons, text=lock_label, style="Ghost.TButton", command=self._toggle_lock)
+        lock_key = "btn_set_lock" if not LockManager.is_lock_set() else "btn_remove_lock"
+        btn_lock = ttk.Button(buttons, style="Ghost.TButton", command=self._toggle_lock)
+        self._set_i18n_text(btn_lock, lock_key)
         btn_lock.pack(side="left", padx=3)
         self._apply_rtl_to_widget(btn_lock)
 
-        btn_backup = ttk.Button(buttons, text=tr(self.language, "btn_backup"), style="Ghost.TButton", command=self._create_backup)
+        btn_backup = ttk.Button(buttons, style="Ghost.TButton", command=self._create_backup)
+        self._set_i18n_text(btn_backup, "btn_backup")
         btn_backup.pack(side="left", padx=3)
         self._apply_rtl_to_widget(btn_backup)
 
         btn_cloud = ttk.Button(
             buttons,
-            text=tr(self.language, "btn_cloud_sync"),
             style="Ghost.TButton",
             command=self._open_cloud_sync_dialog,
         )
+        self._set_i18n_text(btn_cloud, "btn_cloud_sync")
         btn_cloud.pack(side="left", padx=3)
         self._apply_rtl_to_widget(btn_cloud)
 
         if not SQLCipherManager.is_encrypted_db(Path(self.database_service.db_path)):
             btn_encrypt = ttk.Button(
                 buttons,
-                text=tr(self.language, "btn_encrypt_db"),
                 style="Ghost.TButton",
                 command=self._encrypt_database,
             )
+            self._set_i18n_text(btn_encrypt, "btn_encrypt_db")
             btn_encrypt.pack(side="left", padx=3)
             self._apply_rtl_to_widget(btn_encrypt)
 
@@ -347,19 +382,19 @@ class ExpensesApp(tk.Tk):
 
         btn_export = ttk.Button(
             buttons,
-            text=tr(self.language, "btn_export"),
             style="Ghost.TButton",
             command=lambda: self._export(self.export_format_var.get()),
         )
+        self._set_i18n_text(btn_export, "btn_export")
         btn_export.pack(side="left", padx=3)
         self._apply_rtl_to_widget(btn_export)
 
         btn_quick = ttk.Button(
             buttons,
-            text=tr(self.language, "btn_quick_export"),
             style="Accent.TButton",
             command=self._quick_export,
         )
+        self._set_i18n_text(btn_quick, "btn_quick_export")
         btn_quick.pack(side="left", padx=3)
         self._apply_rtl_to_widget(btn_quick)
 
@@ -399,18 +434,33 @@ class ExpensesApp(tk.Tk):
 
     def _apply_rtl_to_widget(self, widget: ttk.Widget, text: str | None = None) -> None:
         """Apply RTL reshaping and right alignment to supported widgets."""
-        if not is_rtl(self.language):
-            return
+        rtl = is_rtl(self.language)
         if text is not None:
-            reshaped = reshape_for_rtl(text)
-            if isinstance(widget, (ttk.Label, ttk.Button)):
-                widget.configure(text=reshaped)
+            display_text = reshape_for_rtl(text) if rtl else text
+            if isinstance(widget, (ttk.Label, ttk.Button, ttk.Checkbutton, ttk.LabelFrame)):
+                widget.configure(text=display_text)
         if isinstance(widget, (ttk.Entry, ttk.Combobox)):
-            widget.configure(justify="right")
+            widget.configure(justify="right" if rtl else "left")
         if isinstance(widget, ttk.Label):
-            widget.configure(anchor="e")
-        if isinstance(widget, ttk.Button):
-            widget.configure(width=len(text or widget.cget("text")) + 4)
+            widget.configure(anchor="e" if rtl else "w")
+
+    def _widget_exists(self, widget: tk.Misc | None) -> bool:
+        if widget is None:
+            return False
+        try:
+            return bool(widget.winfo_exists())
+        except tk.TclError:
+            return False
+
+    def _set_i18n_text(self, widget: tk.Misc, key: str, *, register: bool = True) -> None:
+        if not self._widget_exists(widget):
+            return
+        text = tr(self.language, key)
+        if isinstance(widget, (ttk.Label, ttk.Button, ttk.Checkbutton, ttk.LabelFrame)):
+            widget.configure(text=self._rtl_text(text))
+            self._apply_rtl_to_widget(widget)
+            if register:
+                self._i18n_widgets.append((widget, key))
 
     def _build_metric_card(
         self,
@@ -450,7 +500,7 @@ class ExpensesApp(tk.Tk):
         if current_was_all:
             self.filter_category_var.set(self._all_label)
 
-        self._build_ui()
+        self._update_all_texts()
         self._refresh_all()
         self._save_ui_state()
 
@@ -470,9 +520,11 @@ class ExpensesApp(tk.Tk):
         return category_options_for_type(self.language, type_key)
 
     def _refresh_all(self) -> None:
-        self._transactions_tab._load_transactions()
-        self._stats_tab._load_stats()
-        if hasattr(self, "_budget_tab"):
+        if self._transactions_tab is not None:
+            self._transactions_tab._load_transactions()
+        if self._stats_tab is not None:
+            self._stats_tab._load_stats()
+        if self._budget_tab is not None:
             self._budget_tab._load_budgets()
 
     def _open_calendar_for_var(
@@ -505,7 +557,8 @@ class ExpensesApp(tk.Tk):
         db_type = self._type_display_to_db.get(display_type, "expense")
         self.register_type_key = db_type
         self.type_var.set(self._type_db_to_display.get(db_type, display_type))
-        self._on_register_type_changed()
+        if self._register_tab is not None:
+            self._register_tab._on_register_type_changed()
 
         self.amount_var.set(row["amount"])
         self.date_var.set(row["date"])
@@ -519,10 +572,6 @@ class ExpensesApp(tk.Tk):
 
         self.description_text.delete("1.0", "end")
         self.description_text.insert("1.0", row["description"])
-        self._update_save_button_text()
-
-        if self._notebook is not None and self._tab_register is not None:
-            self._notebook.select(self._tab_register)
 
     def _delete_selected_transaction(self) -> None:
         row = self._transactions_tab.selected_transaction_data()
@@ -684,31 +733,89 @@ class ExpensesApp(tk.Tk):
         self._save_ui_state()
 
     def _set_theme(self, mode: str) -> None:
-        self.theme_mode = "dark" if mode == "dark" else "light"
-        self._setup_theme()
+        self.theme_manager.set_mode(mode)
+        self.theme_mode = self.theme_manager.theme_mode
+        self.theme_manager.setup(self)
         self._apply_runtime_theme()
         self._update_theme_button_text()
 
     def _apply_runtime_theme(self) -> None:
-        if hasattr(self, "description_text"):
+        if self._container is not None:
+            self._apply_theme_to_widget_tree(self._container)
+        if hasattr(self, "description_text") and self._widget_exists(self.description_text):
             self.description_text.configure(
                 background=self.theme_manager.colors["input_bg"],
                 foreground=self.theme_manager.colors["text"],
                 insertbackground=self.theme_manager.colors["text"],
             )
-        if hasattr(self, "_transactions_tab"):
-            self._transactions_tab.transactions_tree.tag_configure("income", foreground=self.theme_manager.colors["positive"])
-            self._transactions_tab.transactions_tree.tag_configure("expense", foreground=self.theme_manager.colors["negative"])
-        if hasattr(self, "_stats_tab"):
-            self._stats_tab._chart_panel.set_colors(self.theme_manager.colors)
+        if self._transactions_tab is not None:
+            self._transactions_tab.apply_theme()
+        if self._register_tab is not None:
+            self._register_tab.apply_theme()
+        if self._stats_tab is not None:
+            self._stats_tab.apply_theme()
+        if self._budget_tab is not None:
+            self._budget_tab.apply_theme()
         self._update_kpi_colors()
 
     def _update_theme_button_text(self) -> None:
-        if hasattr(self, "theme_button"):
+        if hasattr(self, "theme_button") and self._widget_exists(self.theme_button):
             if self.theme_manager.theme_mode == "light":
-                self.theme_button.configure(text=tr(self.language, "btn_dark_mode"))
+                self.theme_button.configure(text=self._rtl_text(tr(self.language, "btn_dark_mode")))
             else:
-                self.theme_button.configure(text=tr(self.language, "btn_light_mode"))
+                self.theme_button.configure(text=self._rtl_text(tr(self.language, "btn_light_mode")))
+
+    def _apply_theme_to_widget_tree(self, widget: tk.Misc) -> None:
+        if not self._widget_exists(widget):
+            return
+        if isinstance(widget, tk.Text):
+            widget.configure(
+                background=self.theme_manager.colors["input_bg"],
+                foreground=self.theme_manager.colors["text"],
+                insertbackground=self.theme_manager.colors["text"],
+            )
+        elif isinstance(widget, (tk.Frame, tk.Canvas)):
+            try:
+                widget.configure(background=self.theme_manager.colors["bg"])
+            except tk.TclError:
+                pass
+        for child in widget.winfo_children():
+            self._apply_theme_to_widget_tree(child)
+
+    def _update_all_texts(self) -> None:
+        self.title(tr(self.language, "app_title"))
+        self._i18n_widgets = [(widget, key) for widget, key in self._i18n_widgets if self._widget_exists(widget)]
+        for widget, key in self._i18n_widgets:
+            self._set_i18n_text(widget, key, register=False)
+
+        if hasattr(self, "theme_button"):
+            self._update_theme_button_text()
+        if hasattr(self, "palette_var"):
+            self.palette_var.set(self.theme_manager.palette)
+        if hasattr(self, "language_box") and self._widget_exists(self.language_box):
+            self.language_box.configure(values=list(self._language_display_to_code.keys()))
+            self._apply_rtl_to_widget(self.language_box)
+        if hasattr(self, "palette_box") and self._widget_exists(self.palette_box):
+            self._apply_rtl_to_widget(self.palette_box)
+
+        if self._notebook is not None and self._widget_exists(self._notebook):
+            tab_keys = ["tab_register", "tab_transactions", "tab_stats", "tab_budget"]
+            for index, key in enumerate(tab_keys):
+                try:
+                    self._notebook.tab(index, text=self._rtl_text(tr(self.language, key)))
+                except tk.TclError:
+                    continue
+
+        if self._register_tab is not None:
+            self._register_tab.update_texts()
+        if self._transactions_tab is not None:
+            self._transactions_tab.update_texts()
+        if self._stats_tab is not None:
+            self._stats_tab.update_texts()
+        if self._budget_tab is not None:
+            self._budget_tab.update_texts()
+
+        self._apply_runtime_theme()
 
     def _setup_shortcuts(self) -> None:
         self.bind_all("<Control-n>", lambda _event: self._shortcut_new_transaction())
@@ -727,7 +834,8 @@ class ExpensesApp(tk.Tk):
         if isinstance(focused, (tk.Entry, tk.Text)):
             return
         self._select_tab(0)
-        self._clear_form(keep_date=True)
+        if self._register_tab is not None:
+            self._register_tab._clear_form(keep_date=True)
         if hasattr(self, "amount_entry"):
             self.amount_entry.focus_set()
 
@@ -740,7 +848,8 @@ class ExpensesApp(tk.Tk):
         focused = self.focus_get()
         if isinstance(focused, tk.Text):
             return
-        self._save_transaction()
+        if self._register_tab is not None:
+            self._register_tab._save_transaction()
 
     def _select_tab(self, index: int) -> None:
         if self._notebook is not None:
@@ -750,10 +859,15 @@ class ExpensesApp(tk.Tk):
     def _set_indicator(label: ttk.Label | None, text: str, color: str = "") -> None:
         if label is None:
             return
-        label.configure(text=text, foreground=color if color else label.master["style"])
+        try:
+            if not label.winfo_exists():
+                return
+        except tk.TclError:
+            return
+        label.configure(text=text, foreground=color if color else "")
 
     def _update_kpi_colors(self) -> None:
-        if not hasattr(self, "balance_label"):
+        if not hasattr(self, "balance_label") or not self._widget_exists(self.balance_label):
             return
 
         balance = float(self._last_totals.get("balance", 0.0))
@@ -761,9 +875,9 @@ class ExpensesApp(tk.Tk):
             foreground=self.theme_manager.colors["positive"] if balance >= 0 else self.theme_manager.colors["negative"]
         )
 
-        if hasattr(self, "income_label"):
+        if hasattr(self, "income_label") and self._widget_exists(self.income_label):
             self.income_label.configure(foreground=self.theme_manager.colors["positive"])
-        if hasattr(self, "expense_label"):
+        if hasattr(self, "expense_label") and self._widget_exists(self.expense_label):
             self.expense_label.configure(foreground=self.theme_manager.colors["negative"])
 
     def _generate_charts(self) -> None:
@@ -801,7 +915,8 @@ class ExpensesApp(tk.Tk):
         if new_palette == self.theme_manager.palette:
             return
         self.theme_manager.set_palette(new_palette)
-        if hasattr(self, "_stats_tab"):
+        self.palette = self.theme_manager.palette
+        if self._stats_tab is not None:
             self._stats_tab._refresh_chart_panel()
         self._save_ui_state()
 
