@@ -28,10 +28,12 @@ LOCALES_DIR = Path(__file__).resolve().parent.parent / "expenses_tracker" / "loc
 
 
 def get_en_translations() -> dict[str, str]:
+    """Load and return English translations as a dict."""
     en_path = LOCALES_DIR / "en.json"
     with open(en_path, encoding="utf-8") as f:
         data = json.load(f)
-    return data["translations"]
+    translations: dict[str, str] = data.get("translations", {})
+    return translations
 
 
 def create_locale(
@@ -42,6 +44,7 @@ def create_locale(
     thousands_sep: str,
     rtl: bool,
 ) -> None:
+    """Create a new locale file from the English template."""
     dest = LOCALES_DIR / f"{code}.json"
     if dest.exists():
         print(f"Error: {dest} already exists.", file=sys.stderr)
@@ -76,12 +79,13 @@ def create_locale(
     print(f"  Thousands separator: '{thousands_sep}'")
     print(f"  RTL: {rtl}")
     print()
-    print(f"Next steps:")
+    print("Next steps:")
     print(f"  1. Edit {dest} and replace English placeholders with {name} translations")
     print(f"  2. Validate: python scripts/add_language.py --validate {code}")
 
 
-def validate_locale(code: str) -> None:
+def validate_locale(code: str) -> bool:
+    """Validate a locale file for missing or extra translation keys."""
     locale_path = LOCALES_DIR / f"{code}.json"
     if not locale_path.exists():
         print(f"Error: {locale_path} does not exist.", file=sys.stderr)
@@ -114,7 +118,12 @@ def validate_locale(code: str) -> None:
         errors += 1
 
     if missing:
-        print(f"  WARNING: {len(missing)} missing translation keys: {sorted(missing)[:10]}{'...' if len(missing) > 10 else ''}")
+        missing_preview = sorted(missing)[:10]
+        missing_suffix = "..." if len(missing) > 10 else ""
+        print(
+            f"  WARNING: {len(missing)} missing translation keys:"
+            f" {missing_preview}{missing_suffix}"
+        )
         errors += 1
 
     if extra:
@@ -135,6 +144,7 @@ def validate_locale(code: str) -> None:
 
 
 def list_locales() -> None:
+    """Print all available locales with their names."""
     print("Available locales:")
     for path in sorted(LOCALES_DIR.glob("*.json")):
         code = path.stem
@@ -148,6 +158,7 @@ def list_locales() -> None:
 
 
 def main() -> None:
+    """CLI entry point for language management."""
     parser = argparse.ArgumentParser(
         description="Add a new language or validate existing locales for the expenses tracker."
     )
