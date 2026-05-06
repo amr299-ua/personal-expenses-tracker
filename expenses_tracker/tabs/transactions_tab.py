@@ -29,34 +29,29 @@ class TransactionsTab:
     def _build(self) -> None:
         filters = ttk.LabelFrame(
             self.parent,
-            text=self.app._rtl_text(tr(self.app.language, "filters_title")),
             padding=10,
             style="Card.TLabelframe",
         )
+        self.app._set_i18n_text(filters, "filters_title")
         filters.pack(fill="x", padx=0, pady=(0, 8))
 
         label_sticky = "e" if is_rtl(self.app.language) else "w"
 
-        ttk.Label(
-            filters,
-            text=self.app._rtl_text(tr(self.app.language, "label_search")),
-        ).grid(row=0, column=0, sticky=label_sticky)
-        ttk.Label(
-            filters,
-            text=self.app._rtl_text(tr(self.app.language, "label_type")),
-        ).grid(row=0, column=1, sticky=label_sticky)
-        ttk.Label(
-            filters,
-            text=self.app._rtl_text(tr(self.app.language, "label_category")),
-        ).grid(row=0, column=2, sticky=label_sticky)
-        ttk.Label(
-            filters,
-            text=self.app._rtl_text(tr(self.app.language, "label_from")),
-        ).grid(row=0, column=3, sticky=label_sticky)
-        ttk.Label(
-            filters,
-            text=self.app._rtl_text(tr(self.app.language, "label_to")),
-        ).grid(row=0, column=4, sticky=label_sticky)
+        lbl_search = ttk.Label(filters)
+        self.app._set_i18n_text(lbl_search, "label_search")
+        lbl_search.grid(row=0, column=0, sticky=label_sticky)
+        lbl_type = ttk.Label(filters)
+        self.app._set_i18n_text(lbl_type, "label_type")
+        lbl_type.grid(row=0, column=1, sticky=label_sticky)
+        lbl_category = ttk.Label(filters)
+        self.app._set_i18n_text(lbl_category, "label_category")
+        lbl_category.grid(row=0, column=2, sticky=label_sticky)
+        lbl_from = ttk.Label(filters)
+        self.app._set_i18n_text(lbl_from, "label_from")
+        lbl_from.grid(row=0, column=3, sticky=label_sticky)
+        lbl_to = ttk.Label(filters)
+        self.app._set_i18n_text(lbl_to, "label_to")
+        lbl_to.grid(row=0, column=4, sticky=label_sticky)
 
         search_entry = ttk.Entry(
             filters,
@@ -75,6 +70,7 @@ class TransactionsTab:
         type_box.grid(row=1, column=1, sticky="we", padx=(0, 8), pady=(2, 0))
         type_box.bind("<<ComboboxSelected>>", lambda _event: self._on_filter_change())
         self.app._apply_rtl_to_widget(type_box)
+        self.app.filter_type_box = type_box
 
         self.app.category_filter_box = ttk.Combobox(
             filters,
@@ -97,6 +93,7 @@ class TransactionsTab:
         )
         from_entry.pack(side="left", fill="x", expand=True)
         from_entry.bind("<KeyRelease>", lambda _event: self._on_filter_change())
+        self.app.filter_from_entry = from_entry
         ttk.Button(
             from_field,
             text="...",
@@ -118,6 +115,7 @@ class TransactionsTab:
         )
         to_entry.pack(side="left", fill="x", expand=True)
         to_entry.bind("<KeyRelease>", lambda _event: self._on_filter_change())
+        self.app.filter_to_entry = to_entry
         ttk.Button(
             to_field,
             text="...",
@@ -133,35 +131,34 @@ class TransactionsTab:
         filter_actions.grid(row=1, column=5, sticky="e")
         btn_apply = ttk.Button(
             filter_actions,
-            text=tr(self.app.language, "btn_apply"),
             style="Accent.TButton",
             command=self._load_transactions,
         )
+        self.app._set_i18n_text(btn_apply, "btn_apply")
         btn_apply.pack(side="left", padx=3)
         self.app._apply_rtl_to_widget(btn_apply)
 
         btn_clear_filters = ttk.Button(
             filter_actions,
-            text=tr(self.app.language, "btn_clear"),
             style="Ghost.TButton",
             command=self._clear_filters,
         )
+        self.app._set_i18n_text(btn_clear_filters, "btn_clear")
         btn_clear_filters.pack(side="left", padx=3)
         self.app._apply_rtl_to_widget(btn_clear_filters)
 
         quick_ranges = ttk.Frame(filters, style="Card.TFrame")
         quick_ranges.grid(row=2, column=0, columnspan=6, sticky=label_sticky, pady=(8, 0))
-        ttk.Label(
-            quick_ranges,
-            text=self.app._rtl_text(tr(self.app.language, "label_quick_dates")),
-        ).pack(side="left", padx=(0, 6))
+        lbl_quick_dates = ttk.Label(quick_ranges)
+        self.app._set_i18n_text(lbl_quick_dates, "label_quick_dates")
+        lbl_quick_dates.pack(side="left", padx=(0, 6))
         for preset in ["btn_today", "btn_week", "btn_month", "btn_year", "btn_all"]:
             btn = ttk.Button(
                 quick_ranges,
-                text=tr(self.app.language, preset),
                 style="Ghost.TButton",
                 command=lambda p=preset: self._apply_date_preset(p.replace("btn_", "")),  # type: ignore[misc]
             )
+            self.app._set_i18n_text(btn, preset)
             btn.pack(side="left", padx=2)
             self.app._apply_rtl_to_widget(btn)
 
@@ -175,19 +172,19 @@ class TransactionsTab:
         actions_row.pack(fill="x", pady=(0, 6))
         btn_load = ttk.Button(
             actions_row,
-            text=tr(self.app.language, "btn_load_form"),
             style="Ghost.TButton",
             command=self.app._load_selected_into_form,
         )
+        self.app._set_i18n_text(btn_load, "btn_load_form")
         btn_load.pack(side="left", padx=(0, 6))
         self.app._apply_rtl_to_widget(btn_load)
 
         btn_delete = ttk.Button(
             actions_row,
-            text=tr(self.app.language, "btn_delete"),
             style="Ghost.TButton",
             command=self.app._delete_selected_transaction,
         )
+        self.app._set_i18n_text(btn_delete, "btn_delete")
         btn_delete.pack(side="left")
         self.app._apply_rtl_to_widget(btn_delete)
 
@@ -290,6 +287,7 @@ class TransactionsTab:
                     row["description"],
                 ),
                 tags=(tag,),
+                text=str(row["transaction_date"]),
             )
 
         self.app.filtered_count_var.set(
@@ -392,9 +390,37 @@ class TransactionsTab:
             label = title if column_name != self.app.sort_column else f"{title} {arrow}"
             self.transactions_tree.heading(
                 column_name,
-                text=label,
+                text=self.app._rtl_text(label),
                 command=lambda selected=column_name: self._on_sort_change(selected),
             )
+
+    def update_texts(self) -> None:
+        """Refresh translated text, filters and table headings."""
+        if hasattr(self.app, "filter_type_var"):
+            self.app.filter_type_var.set(
+                self.app._filter_key_to_display.get(self.app.filter_type_key, self.app._all_label)
+            )
+        if hasattr(self.app, "filter_type_box") and self.app._widget_exists(self.app.filter_type_box):
+            self.app.filter_type_box.configure(values=list(self.app._filter_display_to_key.keys()))
+            self.app._apply_rtl_to_widget(self.app.filter_type_box)
+        if hasattr(self.app, "category_filter_box") and self.app._widget_exists(self.app.category_filter_box):
+            self.app.category_filter_box.configure(values=[self.app._all_label])
+            if not self.app.filter_category_var.get().strip():
+                self.app.filter_category_var.set(self.app._all_label)
+            self.app._apply_rtl_to_widget(self.app.category_filter_box)
+        if hasattr(self.app, "search_entry") and self.app._widget_exists(self.app.search_entry):
+            self.app._apply_rtl_to_widget(self.app.search_entry)
+        if hasattr(self.app, "filter_from_entry") and self.app._widget_exists(self.app.filter_from_entry):
+            self.app._apply_rtl_to_widget(self.app.filter_from_entry)
+        if hasattr(self.app, "filter_to_entry") and self.app._widget_exists(self.app.filter_to_entry):
+            self.app._apply_rtl_to_widget(self.app.filter_to_entry)
+        self._refresh_sort_headers()
+
+    def apply_theme(self) -> None:
+        """Apply runtime theme colors to transaction tags."""
+        if hasattr(self, "transactions_tree") and self.app._widget_exists(self.transactions_tree):
+            self.transactions_tree.tag_configure("income", foreground=self.app.theme_manager.colors["positive"])
+            self.transactions_tree.tag_configure("expense", foreground=self.app.theme_manager.colors["negative"])
 
     # ------------------------------------------------------------------
     # Pagination
@@ -420,9 +446,10 @@ class TransactionsTab:
         if len(values) < 6:
             return None
 
+        iso_date = self.transactions_tree.item(selection[0], "text")
         return {
             "id": str(values[0]),
-            "date": str(values[1]),
+            "date": iso_date if iso_date else str(values[1]),
             "type": str(values[2]),
             "category": str(values[3]),
             "amount": str(values[4]),

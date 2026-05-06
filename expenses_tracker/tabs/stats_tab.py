@@ -35,10 +35,10 @@ class StatsTab:
 
         left_tree = ttk.LabelFrame(
             left,
-            text=self.app._rtl_text(tr(self.app.language, "group_by_category")),
             padding=8,
             style="Card.TLabelframe",
         )
+        self.app._set_i18n_text(left_tree, "group_by_category")
         left_tree.pack(fill="both", expand=False, side="top", pady=(0, 5))
 
         self.category_tree = ttk.Treeview(
@@ -67,20 +67,20 @@ class StatsTab:
 
         left_chart = ttk.LabelFrame(
             left,
-            text=self.app._rtl_text(tr(self.app.language, "chart_title_category")),
             padding=8,
             style="Card.TLabelframe",
         )
+        self.app._set_i18n_text(left_chart, "chart_title_category")
         left_chart.pack(fill="both", expand=True, side="top")
         chart_frame_category = ttk.Frame(left_chart, style="Card.TFrame")
         chart_frame_category.pack(fill="both", expand=True)
 
         right_tree = ttk.LabelFrame(
             right,
-            text=self.app._rtl_text(tr(self.app.language, "group_by_month")),
             padding=8,
             style="Card.TLabelframe",
         )
+        self.app._set_i18n_text(right_tree, "group_by_month")
         right_tree.pack(fill="both", expand=False, side="top", pady=(0, 5))
 
         self.month_tree = ttk.Treeview(
@@ -109,37 +109,37 @@ class StatsTab:
         series_toggles.pack(fill="x", pady=(4, 2))
         chk_income = ttk.Checkbutton(
             series_toggles,
-            text=self.app._rtl_text(tr(self.app.language, "legend_income")),
             variable=self.app._show_income,
             command=self._refresh_chart_panel,
         )
+        self.app._set_i18n_text(chk_income, "legend_income")
         chk_income.pack(side="left", padx=(0, 8))
         self.app._apply_rtl_to_widget(chk_income)
 
         chk_expense = ttk.Checkbutton(
             series_toggles,
-            text=self.app._rtl_text(tr(self.app.language, "legend_expense")),
             variable=self.app._show_expense,
             command=self._refresh_chart_panel,
         )
+        self.app._set_i18n_text(chk_expense, "legend_expense")
         chk_expense.pack(side="left", padx=(0, 8))
         self.app._apply_rtl_to_widget(chk_expense)
 
         chk_balance = ttk.Checkbutton(
             series_toggles,
-            text=self.app._rtl_text(tr(self.app.language, "legend_balance")),
             variable=self.app._show_balance,
             command=self._refresh_chart_panel,
         )
+        self.app._set_i18n_text(chk_balance, "legend_balance")
         chk_balance.pack(side="left", padx=(0, 8))
         self.app._apply_rtl_to_widget(chk_balance)
 
         right_chart = ttk.LabelFrame(
             right,
-            text=self.app._rtl_text(tr(self.app.language, "chart_title_month")),
             padding=8,
             style="Card.TLabelframe",
         )
+        self.app._set_i18n_text(right_chart, "chart_title_month")
         right_chart.pack(fill="both", expand=True, side="top")
         chart_frame_month = ttk.Frame(right_chart, style="Card.TFrame")
         chart_frame_month.pack(fill="both", expand=True)
@@ -212,3 +212,24 @@ class StatsTab:
                 self.app.transaction_service.get_totals_by_category(),
                 self.app.transaction_service.get_totals_by_month(),
             )
+
+    def update_texts(self) -> None:
+        """Refresh translated headings and chart language."""
+        if hasattr(self, "category_tree") and self.app._widget_exists(self.category_tree):
+            self.category_tree.heading("category", text=self.app._rtl_text(tr(self.app.language, "col_category")))
+            self.category_tree.heading("income", text=self.app._rtl_text(tr(self.app.language, "legend_income")))
+            self.category_tree.heading("expense", text=self.app._rtl_text(tr(self.app.language, "legend_expense")))
+            self.category_tree.heading("balance", text=self.app._rtl_text(tr(self.app.language, "legend_balance")))
+        if hasattr(self, "month_tree") and self.app._widget_exists(self.month_tree):
+            self.month_tree.heading("month", text=self.app._rtl_text(tr(self.app.language, "chart_x_month")))
+            self.month_tree.heading("income", text=self.app._rtl_text(tr(self.app.language, "legend_income")))
+            self.month_tree.heading("expense", text=self.app._rtl_text(tr(self.app.language, "legend_expense")))
+            self.month_tree.heading("balance", text=self.app._rtl_text(tr(self.app.language, "legend_balance")))
+        if hasattr(self, "_chart_panel"):
+            self._chart_panel.set_language(self.app.language)
+
+    def apply_theme(self) -> None:
+        """Apply runtime theme colors to embedded charts."""
+        if hasattr(self, "_chart_panel"):
+            self._chart_panel.set_colors(self.app.theme_manager.colors)
+            self._refresh_chart_panel()

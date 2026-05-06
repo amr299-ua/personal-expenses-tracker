@@ -33,17 +33,18 @@ class BudgetTab:
 
         label_sticky = "e" if is_rtl(self.app.language) else "w"
 
-        ttk.Label(controls, text=self.app._rtl_text(tr(self.app.language, "label_month"))).grid(
-            row=0, column=0, sticky=label_sticky, padx=(0, 8)
-        )
+        lbl_month = ttk.Label(controls)
+        self.app._set_i18n_text(lbl_month, "label_month")
+        lbl_month.grid(row=0, column=0, sticky=label_sticky, padx=(0, 8))
         self.month_var = tk.StringVar(value=date.today().strftime("%Y-%m"))
         month_entry = ttk.Entry(controls, textvariable=self.month_var, width=12)
         month_entry.grid(row=0, column=1, sticky="we", padx=(0, 16))
         month_entry.bind("<KeyRelease>", lambda _event: self._load_budgets())
+        self.month_entry = month_entry
 
-        ttk.Label(controls, text=self.app._rtl_text(tr(self.app.language, "label_category"))).grid(
-            row=0, column=2, sticky=label_sticky, padx=(0, 8)
-        )
+        lbl_category = ttk.Label(controls)
+        self.app._set_i18n_text(lbl_category, "label_category")
+        lbl_category.grid(row=0, column=2, sticky=label_sticky, padx=(0, 8))
         self.budget_category_var = tk.StringVar()
         self.category_box = ttk.Combobox(
             controls,
@@ -54,36 +55,37 @@ class BudgetTab:
         )
         self.category_box.grid(row=0, column=3, sticky="we", padx=(0, 16))
 
-        ttk.Label(controls, text=self.app._rtl_text(tr(self.app.language, "label_amount"))).grid(
-            row=0, column=4, sticky=label_sticky, padx=(0, 8)
-        )
+        lbl_amount = ttk.Label(controls)
+        self.app._set_i18n_text(lbl_amount, "label_amount")
+        lbl_amount.grid(row=0, column=4, sticky=label_sticky, padx=(0, 8))
         self.planned_var = tk.StringVar()
-        ttk.Entry(controls, textvariable=self.planned_var, width=14).grid(row=0, column=5, sticky="we", padx=(0, 16))
+        self.planned_entry = ttk.Entry(controls, textvariable=self.planned_var, width=14)
+        self.planned_entry.grid(row=0, column=5, sticky="we", padx=(0, 16))
 
         btn_save = ttk.Button(
             controls,
-            text=tr(self.app.language, "btn_save"),
             style="Accent.TButton",
             command=self._save_budget,
         )
+        self.app._set_i18n_text(btn_save, "btn_save")
         btn_save.grid(row=0, column=6, padx=(0, 6))
         self.app._apply_rtl_to_widget(btn_save)
 
         btn_delete = ttk.Button(
             controls,
-            text=tr(self.app.language, "btn_delete"),
             style="Ghost.TButton",
             command=self._delete_budget,
         )
+        self.app._set_i18n_text(btn_delete, "btn_delete")
         btn_delete.grid(row=0, column=7, padx=(0, 6))
         self.app._apply_rtl_to_widget(btn_delete)
 
         btn_clear = ttk.Button(
             controls,
-            text=tr(self.app.language, "btn_clear"),
             style="Ghost.TButton",
             command=self._clear_form,
         )
+        self.app._set_i18n_text(btn_clear, "btn_clear")
         btn_clear.grid(row=0, column=8)
         self.app._apply_rtl_to_widget(btn_clear)
 
@@ -166,6 +168,28 @@ class BudgetTab:
                 tags=(tag,),
             )
 
+        self.budget_tree.tag_configure("over", foreground=self.app.theme_manager.colors["negative"])
+        self.budget_tree.tag_configure("warning", foreground="#f9a825")
+        self.budget_tree.tag_configure("ok", foreground=self.app.theme_manager.colors["positive"])
+
+    def update_texts(self) -> None:
+        """Refresh translated budget headings and field direction."""
+        if not hasattr(self, "budget_tree") or not self.app._widget_exists(self.budget_tree):
+            return
+        self.budget_tree.heading("category", text=self.app._rtl_text(tr(self.app.language, "col_category")))
+        self.budget_tree.heading("planned", text=self.app._rtl_text(tr(self.app.language, "legend_planned")))
+        self.budget_tree.heading("actual", text=self.app._rtl_text(tr(self.app.language, "legend_actual")))
+        self.budget_tree.heading("difference", text=self.app._rtl_text(tr(self.app.language, "col_difference")))
+        self.budget_tree.heading("percent", text=self.app._rtl_text(tr(self.app.language, "col_percent")))
+        self.budget_tree.heading("status", text=self.app._rtl_text(tr(self.app.language, "col_status")))
+        self.app._apply_rtl_to_widget(self.category_box)
+        self.app._apply_rtl_to_widget(self.month_entry)
+        self.app._apply_rtl_to_widget(self.planned_entry)
+
+    def apply_theme(self) -> None:
+        """Apply runtime theme colors to budget status tags."""
+        if not hasattr(self, "budget_tree") or not self.app._widget_exists(self.budget_tree):
+            return
         self.budget_tree.tag_configure("over", foreground=self.app.theme_manager.colors["negative"])
         self.budget_tree.tag_configure("warning", foreground="#f9a825")
         self.budget_tree.tag_configure("ok", foreground=self.app.theme_manager.colors["positive"])

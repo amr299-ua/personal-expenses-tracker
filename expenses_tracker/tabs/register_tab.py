@@ -32,15 +32,20 @@ class RegisterTab:
 
         label_sticky = "e" if is_rtl(self.app.language) else "w"
 
-        lbl_type = ttk.Label(form, text=self.app._rtl_text(tr(self.app.language, "label_type")))
+        lbl_type = ttk.Label(form)
+        self.app._set_i18n_text(lbl_type, "label_type")
         lbl_type.grid(row=0, column=0, sticky=label_sticky, pady=4)
-        lbl_amount = ttk.Label(form, text=self.app._rtl_text(tr(self.app.language, "label_amount")))
+        lbl_amount = ttk.Label(form)
+        self.app._set_i18n_text(lbl_amount, "label_amount")
         lbl_amount.grid(row=0, column=1, sticky=label_sticky, pady=4)
-        lbl_category = ttk.Label(form, text=self.app._rtl_text(tr(self.app.language, "label_category")))
+        lbl_category = ttk.Label(form)
+        self.app._set_i18n_text(lbl_category, "label_category")
         lbl_category.grid(row=0, column=2, sticky=label_sticky, pady=4)
-        lbl_date = ttk.Label(form, text=self.app._rtl_text(tr(self.app.language, "label_date")))
+        lbl_date = ttk.Label(form)
+        self.app._set_i18n_text(lbl_date, "label_date")
         lbl_date.grid(row=0, column=3, sticky=label_sticky, pady=4)
-        lbl_currency = ttk.Label(form, text=self.app._rtl_text(tr(self.app.language, "label_currency")))
+        lbl_currency = ttk.Label(form)
+        self.app._set_i18n_text(lbl_currency, "label_currency")
         lbl_currency.grid(row=0, column=4, sticky=label_sticky, pady=4)
 
         type_box = ttk.Combobox(
@@ -53,6 +58,7 @@ class RegisterTab:
         type_box.grid(row=1, column=0, sticky="we", padx=(0, 10), pady=(0, 2))
         type_box.bind("<<ComboboxSelected>>", lambda _event: self._on_register_type_changed())
         self.app._apply_rtl_to_widget(type_box)
+        self.app.type_box = type_box
 
         amount_field = ttk.Frame(form)
         amount_field.grid(row=1, column=1, sticky="we", padx=(0, 10), pady=(0, 2))
@@ -110,7 +116,8 @@ class RegisterTab:
         self.app.currency_box.pack(side="left", fill="x", expand=True)
         self.app._apply_rtl_to_widget(self.app.currency_box)
 
-        lbl_description = ttk.Label(form, text=self.app._rtl_text(tr(self.app.language, "label_description")))
+        lbl_description = ttk.Label(form)
+        self.app._set_i18n_text(lbl_description, "label_description")
         lbl_description.grid(row=2, column=0, sticky=label_sticky, pady=4)
         self.app.description_text = tk.Text(
             form,
@@ -146,10 +153,10 @@ class RegisterTab:
 
         btn_clear = ttk.Button(
             actions,
-            text=tr(self.app.language, "btn_clear"),
             style="Ghost.TButton",
             command=self._clear_form,
         )
+        self.app._set_i18n_text(btn_clear, "btn_clear")
         btn_clear.pack(side="left", padx=4)
         self.app._apply_rtl_to_widget(btn_clear)
 
@@ -259,6 +266,36 @@ class RegisterTab:
         else:
             self.app.save_button_var.set(tr(self.app.language, "btn_update_transaction"))
 
+    def update_texts(self) -> None:
+        """Refresh translated text and localized widget state."""
+        current_type = self.app.register_type_key
+        self.app.type_var.set(self.app._type_db_to_display.get(current_type, tr(self.app.language, "type_expense")))
+        if hasattr(self.app, "category_box") and self.app._widget_exists(self.app.category_box):
+            self.app.category_box.configure(values=self.app._category_options(current_type))
+            self.app._apply_rtl_to_widget(self.app.category_box)
+        if hasattr(self.app, "type_box") and self.app._widget_exists(self.app.type_box):
+            self.app.type_box.configure(values=list(self.app._type_display_to_db.keys()))
+            self.app._apply_rtl_to_widget(self.app.type_box)
+        if hasattr(self.app, "amount_entry") and self.app._widget_exists(self.app.amount_entry):
+            self.app._apply_rtl_to_widget(self.app.amount_entry)
+        if hasattr(self.app, "date_entry") and self.app._widget_exists(self.app.date_entry):
+            self.app._apply_rtl_to_widget(self.app.date_entry)
+        if hasattr(self.app, "currency_box") and self.app._widget_exists(self.app.currency_box):
+            self.app._apply_rtl_to_widget(self.app.currency_box)
+        self._update_save_button_text()
+
+    def apply_theme(self) -> None:
+        """Apply runtime theme colors to non-ttk widgets and indicators."""
+        if hasattr(self.app, "description_text") and self.app._widget_exists(self.app.description_text):
+            self.app.description_text.configure(
+                background=self.app.theme_manager.colors["input_bg"],
+                foreground=self.app.theme_manager.colors["text"],
+                insertbackground=self.app.theme_manager.colors["text"],
+            )
+        self._validate_amount()
+        self._validate_date()
+        self._validate_category()
+
     # ------------------------------------------------------------------
     # Validation
     # ------------------------------------------------------------------
@@ -299,4 +336,9 @@ class RegisterTab:
     def _set_indicator(label: ttk.Label | None, text: str, color: str = "") -> None:
         if label is None:
             return
-        label.configure(text=text, foreground=color if color else label.master["style"])
+        try:
+            if not label.winfo_exists():
+                return
+        except tk.TclError:
+            return
+        label.configure(text=text, foreground=color if color else "")
