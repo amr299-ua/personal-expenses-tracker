@@ -54,6 +54,7 @@ def _build_parser(language: str) -> argparse.ArgumentParser:
     add_parser.add_argument("--category", required=True)
     add_parser.add_argument("--date", required=True, help=tr(language, "arg_date"))
     add_parser.add_argument("--description", default="")
+    add_parser.add_argument("--currency", default="USD", help=tr(language, "arg_currency"))
 
     list_parser = subparsers.add_parser("list", help=tr(language, "cmd_list"))
     list_parser.add_argument("--limit", type=_positive_int, default=20)
@@ -130,6 +131,7 @@ def main() -> int:
                     category=args.category,
                     transaction_date=transaction_date,
                     description=args.description,
+                    currency=args.currency,
                 ),
                 language=language,
             )
