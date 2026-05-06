@@ -1,21 +1,20 @@
-"""Initial migration with categories and transactions
+"""Initial migration with categories and transactions.
 
 Revision ID: 353e83e9a124
-Revises: 
+Revises:
 Create Date: 2026-05-04 15:27:19.617361
 
 """
-from typing import Sequence, Union
+from collections.abc import Sequence
 
-from alembic import op
 import sqlalchemy as sa
-
+from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = '353e83e9a124'
-down_revision: Union[str, Sequence[str], None] = None
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+down_revision: str | Sequence[str] | None = None
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
@@ -45,11 +44,37 @@ def upgrade() -> None:
         batch_op.alter_column('currency', existing_type=sa.String(length=3), nullable=False)
         batch_op.alter_column('recurring', existing_type=sa.Boolean(), nullable=False)
         batch_op.alter_column('id', existing_type=sa.INTEGER(), nullable=False, autoincrement=True)
-        batch_op.alter_column('amount', existing_type=sa.REAL(), type_=sa.Numeric(precision=15, scale=2), existing_nullable=False)
-        batch_op.alter_column('transaction_type', existing_type=sa.TEXT(), type_=sa.String(length=10), existing_nullable=False)
-        batch_op.alter_column('category', existing_type=sa.TEXT(), type_=sa.String(length=120), existing_nullable=False)
-        batch_op.alter_column('transaction_date', existing_type=sa.TEXT(), type_=sa.Date(), existing_nullable=False)
-        batch_op.alter_column('created_at', existing_type=sa.TEXT(), type_=sa.DateTime(), existing_nullable=False, existing_server_default=sa.text('(CURRENT_TIMESTAMP)'))
+        batch_op.alter_column(
+            'amount',
+            existing_type=sa.REAL(),
+            type_=sa.Numeric(precision=15, scale=2),
+            existing_nullable=False,
+        )
+        batch_op.alter_column(
+            'transaction_type',
+            existing_type=sa.TEXT(),
+            type_=sa.String(length=10),
+            existing_nullable=False,
+        )
+        batch_op.alter_column(
+            'category',
+            existing_type=sa.TEXT(),
+            type_=sa.String(length=120),
+            existing_nullable=False,
+        )
+        batch_op.alter_column(
+            'transaction_date',
+            existing_type=sa.TEXT(),
+            type_=sa.Date(),
+            existing_nullable=False,
+        )
+        batch_op.alter_column(
+            'created_at',
+            existing_type=sa.TEXT(),
+            type_=sa.DateTime(),
+            existing_nullable=False,
+            existing_server_default=sa.text('(CURRENT_TIMESTAMP)'),
+        )
         batch_op.drop_index('idx_transactions_date')
         batch_op.drop_index('idx_transactions_category')
         batch_op.create_index('idx_transactions_date_type', ['transaction_date', 'transaction_type'])
@@ -65,11 +90,27 @@ def downgrade() -> None:
         batch_op.drop_index('idx_transactions_date_type')
         batch_op.create_index('idx_transactions_date', ['transaction_date'])
         batch_op.create_index('idx_transactions_category', ['category'])
-        batch_op.alter_column('created_at', existing_type=sa.DateTime(), type_=sa.TEXT(), existing_nullable=False, existing_server_default=sa.text('(CURRENT_TIMESTAMP)'))
+        batch_op.alter_column(
+            'created_at',
+            existing_type=sa.DateTime(),
+            type_=sa.TEXT(),
+            existing_nullable=False,
+            existing_server_default=sa.text('(CURRENT_TIMESTAMP)'),
+        )
         batch_op.alter_column('transaction_date', existing_type=sa.Date(), type_=sa.TEXT(), existing_nullable=False)
         batch_op.alter_column('category', existing_type=sa.String(length=120), type_=sa.TEXT(), existing_nullable=False)
-        batch_op.alter_column('transaction_type', existing_type=sa.String(length=10), type_=sa.TEXT(), existing_nullable=False)
-        batch_op.alter_column('amount', existing_type=sa.Numeric(precision=15, scale=2), type_=sa.REAL(), existing_nullable=False)
+        batch_op.alter_column(
+            'transaction_type',
+            existing_type=sa.String(length=10),
+            type_=sa.TEXT(),
+            existing_nullable=False,
+        )
+        batch_op.alter_column(
+            'amount',
+            existing_type=sa.Numeric(precision=15, scale=2),
+            type_=sa.REAL(),
+            existing_nullable=False,
+        )
         batch_op.alter_column('id', existing_type=sa.INTEGER(), nullable=True, autoincrement=True)
         batch_op.drop_column('recurring')
         batch_op.drop_column('tags')

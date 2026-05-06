@@ -3,24 +3,29 @@ from __future__ import annotations
 import logging
 import smtplib
 import threading
-from collections.abc import Callable
 from datetime import date, datetime, timezone
 from email.mime.application import MIMEApplication
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
-from pathlib import Path
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 import schedule
 
-from expenses_tracker.db import ExpenseDatabase
 from expenses_tracker.exporters import export_reports
 from expenses_tracker.i18n import tr
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+    from pathlib import Path
+
+    from expenses_tracker.db import ExpenseDatabase
 
 logger = logging.getLogger(__name__)
 
 
 class ReportScheduler:
+    """Background scheduler for automated report generation and email."""
+
     def __init__(
         self,
         database: ExpenseDatabase,
@@ -33,8 +38,10 @@ class ReportScheduler:
         self._thread: threading.Thread | None = None
         self._stop_event = threading.Event()
         self._lock = threading.Lock()
+        self._scheduler = schedule.Scheduler()
 
     def start(self) -> None:
+        """Start the background scheduler thread."""
         if self._thread is not None and self._thread.is_alive():
             return
         self._stop_event.clear()
@@ -42,24 +49,26 @@ class ReportScheduler:
         self._thread.start()
 
     def stop(self) -> None:
+        """Stop the background scheduler thread."""
         self._stop_event.set()
         if self._thread is not None:
             self._thread.join(timeout=2)
 
     def _run_loop(self) -> None:
+        """Main scheduler loop running in a background thread."""
         while not self._stop_event.is_set():
             try:
-                with self._lock:
-                    schedule.run_pending()
+                self._scheduler.run_pending()
             except Exception:
                 logger.exception("Scheduler run_pending error")
             self._stop_event.wait(timeout=60)
 
     def update_schedule(self, config: dict[str, Any] | None = None) -> None:
+        """Reconfigure the schedule based on current settings."""
         if config is None:
             config = self.config_getter()
         with self._lock:
-            schedule.clear()
+            self._scheduler.clear()
             if not config.get("enabled"):
                 return
             schedule_type = config.get("schedule_type", "monthly")
@@ -67,18 +76,18 @@ class ReportScheduler:
             schedule_day = config.get("schedule_day")
 
             if schedule_type == "daily":
-                schedule.every().day.at(schedule_time).do(self._run_report)
+                self._scheduler.every().day.at(schedule_time).do(self._run_report)
                 if config.get("backup_enabled"):
-                    schedule.every().day.at(schedule_time).do(self._run_backup)
+                    self._scheduler.every().day.at(schedule_time).do(self._run_backup)
             elif schedule_type == "weekly" and schedule_day is not None:
                 days = [
-                    schedule.every().sunday,
-                    schedule.every().monday,
-                    schedule.every().tuesday,
-                    schedule.every().wednesday,
-                    schedule.every().thursday,
-                    schedule.every().friday,
-                    schedule.every().saturday,
+                    self._scheduler.every().sunday,
+                    self._scheduler.every().monday,
+                    self._scheduler.every().tuesday,
+                    self._scheduler.every().wednesday,
+                    self._scheduler.every().thursday,
+                    self._scheduler.every().friday,
+                    self._scheduler.every().saturday,
                 ]
                 if 0 <= schedule_day < len(days):
                     days[schedule_day].at(schedule_time).do(self._run_report)
@@ -86,11 +95,11 @@ class ReportScheduler:
                         days[schedule_day].at(schedule_time).do(self._run_backup)
             elif schedule_type == "monthly" and schedule_day is not None:
                 # schedule library does not have monthly; use a daily check
-                schedule.every().day.at(schedule_time).do(
+                self._scheduler.every().day.at(schedule_time).do(
                     self._run_monthly_report, day=schedule_day
                 )
                 if config.get("backup_enabled"):
-                    schedule.every().day.at(schedule_time).do(
+                    self._scheduler.every().day.at(schedule_time).do(
                         self._run_monthly_backup, day=schedule_day
                     )
 
@@ -136,7 +145,10 @@ class ReportScheduler:
             self._update_last_run()
             if config.get("email_enabled") and generated:
                 for filepath in generated:
-                    self._send_email(filepath, config)
+                    try:
+                        self._send_email(filepath, config)
+                    except Exception:
+                        logger.exception("Failed to send email for %s", filepath)
         except Exception:
             logger.exception("Report generation failed")
 
@@ -162,11 +174,11 @@ class ReportScheduler:
         if not all([host, port, user, password, to_addr]):
             return
 
-        host_str = cast(str, host)
-        port_int = int(cast(str, port))
-        user_str = cast(str, user)
-        password_str = cast(str, password)
-        to_addr_str = cast(str, to_addr)
+        host_str = cast("str", host)
+        port_int = int(cast("str", port))
+        user_str = cast("str", user)
+        password_str = cast("str", password)
+        to_addr_str = cast("str", to_addr)
 
         msg = MIMEMultipart()
         msg["Subject"] = subject
@@ -180,12 +192,18 @@ class ReportScheduler:
         attachment["Content-Disposition"] = f'attachment; filename="{filepath.name}"'
         msg.attach(attachment)
 
-        with smtplib.SMTP(host_str, port_int) as server:
-            server.starttls()
-            server.login(user_str, password_str)
-            server.send_message(msg)
+        if port_int == 465:
+            with smtplib.SMTP_SSL(host_str, port_int) as server:
+                server.login(user_str, password_str)
+                server.send_message(msg)
+        else:
+            with smtplib.SMTP(host_str, port_int) as server:
+                server.starttls()
+                server.login(user_str, password_str)
+                server.send_message(msg)
 
     def send_test_email(self, config: dict[str, Any]) -> bool:
+        """Send a test email using the provided SMTP configuration."""
         try:
             host = config.get("smtp_host")
             port = config.get("smtp_port")
@@ -197,11 +215,11 @@ class ReportScheduler:
             if not all([host, port, user, password, to_addr]):
                 return False
 
-            host_str = cast(str, host)
-            port_int = int(cast(str, port))
-            user_str = cast(str, user)
-            password_str = cast(str, password)
-            to_addr_str = cast(str, to_addr)
+            host_str = cast("str", host)
+            port_int = int(cast("str", port))
+            user_str = cast("str", user)
+            password_str = cast("str", password)
+            to_addr_str = cast("str", to_addr)
 
             msg = MIMEMultipart()
             msg["Subject"] = subject
@@ -210,10 +228,15 @@ class ReportScheduler:
             body = MIMEText("This is a test email from Personal Expenses Tracker.")
             msg.attach(body)
 
-            with smtplib.SMTP(host_str, port_int) as server:
-                server.starttls()
-                server.login(user_str, password_str)
-                server.send_message(msg)
+            if port_int == 465:
+                with smtplib.SMTP_SSL(host_str, port_int) as server:
+                    server.login(user_str, password_str)
+                    server.send_message(msg)
+            else:
+                with smtplib.SMTP(host_str, port_int) as server:
+                    server.starttls()
+                    server.login(user_str, password_str)
+                    server.send_message(msg)
             return True
         except Exception:
             logger.exception("Test email failed")

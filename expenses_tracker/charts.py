@@ -42,6 +42,7 @@ PALETTES: dict[str, dict[str, str | list[str]]] = {
 
 
 def get_palette(name: str) -> dict[str, str | list[str]]:
+    """Return a named color palette, falling back to default."""
     return PALETTES.get(name, PALETTES["default"])
 
 
@@ -53,6 +54,7 @@ def generate_charts(
     language: str = "en",
     palette: str = "default",
 ) -> list[Path]:
+    """Generate chart images and return the list of file paths."""
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
 
@@ -110,6 +112,7 @@ def generate_budget_chart(
     language: str = "en",
     palette: str = "default",
 ) -> Path | None:
+    """Generate a budget comparison chart image."""
     if not budget_rows:
         return None
     output_path = Path(output_dir)
@@ -158,6 +161,7 @@ def _resolve_chart_kinds(kind: str) -> set[str]:
 def category_totals_figure(
     rows: list[dict[str, Any]], language: str, colors: dict[str, Any]
 ) -> Figure:
+    """Create a bar chart figure for category income vs expense."""
     categories = [str(row["category"]) for row in rows]
     income = [float(row["income"]) for row in rows]
     expense = [float(row["expense"]) for row in rows]
@@ -183,6 +187,7 @@ def category_totals_figure(
 def month_totals_figure(
     rows: list[dict[str, Any]], language: str, colors: dict[str, Any]
 ) -> Figure:
+    """Create a line chart figure for monthly income, expense and balance."""
     months = [str(row["month"]) for row in rows]
     income = [float(row["income"]) for row in rows]
     expense = [float(row["expense"]) for row in rows]
@@ -208,6 +213,7 @@ def month_totals_figure(
 def category_pie_figure(
     rows: list[dict[str, Any]], language: str, colors: dict[str, Any]
 ) -> Figure:
+    """Create pie chart figures for income and expense distribution."""
     categories = [str(row["category"]) for row in rows]
     income = [float(row["income"]) for row in rows]
     expense = [float(row["expense"]) for row in rows]
@@ -258,6 +264,7 @@ def category_pie_figure(
 def month_scatter_figure(
     rows: list[dict[str, Any]], language: str, colors: dict[str, Any]
 ) -> Figure:
+    """Create a scatter plot figure for monthly totals."""
     months = [str(row["month"]) for row in rows]
     income = [float(row["income"]) for row in rows]
     expense = [float(row["expense"]) for row in rows]
@@ -286,6 +293,7 @@ def month_scatter_figure(
 def month_bars_3d_figure(
     rows: list[dict[str, Any]], language: str, colors: dict[str, Any]
 ) -> Figure:
+    """Create a 3D bar chart figure for monthly income and expense."""
     months = [str(row["month"]) for row in rows]
     income = np.array([float(row["income"]) for row in rows], dtype=float)
     expense = np.array([float(row["expense"]) for row in rows], dtype=float)
@@ -297,8 +305,14 @@ def month_bars_3d_figure(
     figure = Figure(figsize=(11, 6))
     axis = figure.add_subplot(111, projection="3d")
 
-    axis.bar3d(x_positions, np.zeros_like(x_positions), np.zeros_like(x_positions), dx, dy, income, color=colors["income"])
-    axis.bar3d(x_positions, np.ones_like(x_positions), np.zeros_like(x_positions), dx, dy, expense, color=colors["expense"])
+    axis.bar3d(
+        x_positions, np.zeros_like(x_positions), np.zeros_like(x_positions),
+        dx, dy, income, color=colors["income"]
+    )
+    axis.bar3d(
+        x_positions, np.ones_like(x_positions), np.zeros_like(x_positions),
+        dx, dy, expense, color=colors["expense"]
+    )
 
     axis.set_xticks(x_positions + 0.17)
     axis.set_xticklabels(months, rotation=25, ha="right")
@@ -316,6 +330,7 @@ def month_bars_3d_figure(
 def forecast_figure(
     rows: list[dict[str, Any]], language: str, colors: dict[str, Any]
 ) -> Figure:
+    """Create a forecast figure with linear trend extrapolation."""
     months = [str(row["month"]) for row in rows]
     expense = np.array([float(row["expense"]) for row in rows], dtype=float)
 
@@ -350,6 +365,7 @@ def forecast_figure(
 def sankey_figure(
     rows: list[dict[str, Any]], language: str, colors: dict[str, Any]
 ) -> Figure:
+    """Create a Sankey diagram figure for income/expense flow."""
     total_income = sum(float(row["income"]) for row in rows)
     total_expense = sum(float(row["expense"]) for row in rows)
 
@@ -382,6 +398,7 @@ def sankey_figure(
 def budget_comparison_figure(
     rows: list[dict[str, Any]], language: str, colors: dict[str, Any]
 ) -> Figure:
+    """Create a grouped bar chart comparing planned vs actual spending."""
     categories = [str(row["category"]) for row in rows]
     actual = [float(row["actual"]) for row in rows]
     planned = [float(row["planned"]) for row in rows]

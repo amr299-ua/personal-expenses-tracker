@@ -1,7 +1,7 @@
 """Script para poblar la base de datos con datos de prueba realistas."""
 
-import sqlite3
 import random
+import sqlite3
 from datetime import date, timedelta
 from pathlib import Path
 
@@ -123,16 +123,19 @@ AMOUNT_RANGES = {
 
 
 def random_amount(category: str) -> float:
+    """Return a random amount within the typical range for a category."""
     lo, hi = AMOUNT_RANGES.get(category, (10, 500))
     return round(random.uniform(lo, hi), 2)
 
 
 def generate_dates(start: date, end: date, n: int) -> list[date]:
+    """Generate n random sorted dates between start and end."""
     delta = (end - start).days
     return sorted(start + timedelta(days=random.randint(0, delta)) for _ in range(n))
 
 
 def seed(n_transactions: int = 500) -> None:
+    """Populate the database with sample transactions."""
     database = ExpenseDatabase(DB_PATH)
     database.initialize()
 

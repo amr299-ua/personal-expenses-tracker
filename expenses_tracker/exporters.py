@@ -8,6 +8,14 @@ from pathlib import Path
 from typing import Any
 from xml.sax.saxutils import escape
 
+
+def _escape_reportlab(value: str) -> str:
+    """Escape text for ReportLab Paragraph content, stripping HTML tags."""
+    import re
+    text = re.sub(r"<[^>]+>", "", value)
+    text = escape(text)
+    return text
+
 import yaml
 from openpyxl import Workbook
 from reportlab.lib import colors
@@ -36,6 +44,7 @@ def export_reports(
     language: str = "en",
     year_month: str | None = None,
 ) -> list[Path]:
+    """Generate reports in the specified format and return output file paths."""
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
 
@@ -125,7 +134,7 @@ def _export_excel(
                 sanitize_spreadsheet_text(row["transaction_date"]),
                 sanitize_spreadsheet_text(transaction_type),
                 sanitize_spreadsheet_text(row["category"]),
-                float(row["amount"]),
+                float(row["amount"] or 0),
                 sanitize_spreadsheet_text(row["description"]),
                 sanitize_spreadsheet_text(row["created_at"]),
             ]
@@ -144,9 +153,9 @@ def _export_excel(
         category_sheet.append(
             [
                 sanitize_spreadsheet_text(row["category"]),
-                float(row["income"]),
-                float(row["expense"]),
-                float(row["balance"]),
+                float(row["income"] or 0),
+                float(row["expense"] or 0),
+                float(row["balance"] or 0),
             ]
         )
 
@@ -163,9 +172,9 @@ def _export_excel(
         month_sheet.append(
             [
                 sanitize_spreadsheet_text(row["month"]),
-                float(row["income"]),
-                float(row["expense"]),
-                float(row["balance"]),
+                float(row["income"] or 0),
+                float(row["expense"] or 0),
+                float(row["balance"] or 0),
             ]
         )
 
@@ -195,7 +204,7 @@ def _export_csv(output_file: Path, transactions: list[dict[str, Any]], language:
                     sanitize_spreadsheet_text(row["transaction_date"]),
                     sanitize_spreadsheet_text(transaction_type),
                     sanitize_spreadsheet_text(row["category"]),
-                    f"{float(row['amount']):.2f}",
+                    f"{float(row['amount'] or 0):.2f}",
                     sanitize_spreadsheet_text(row["description"]),
                     sanitize_spreadsheet_text(row["created_at"]),
                 ]
@@ -235,10 +244,10 @@ def _export_pdf(
 
     category_table_rows = [
         [
-            escape(str(row["category"])),
-            f"{float(row['income']):.2f}",
-            f"{float(row['expense']):.2f}",
-            f"{float(row['balance']):.2f}",
+            _escape_reportlab(str(row["category"])),
+            f"{float(row['income'] or 0):.2f}",
+            f"{float(row['expense'] or 0):.2f}",
+            f"{float(row['balance'] or 0):.2f}",
         ]
         for row in category_rows
     ]
@@ -261,10 +270,10 @@ def _export_pdf(
 
     month_table_rows = [
         [
-            escape(str(row["month"])),
-            f"{float(row['income']):.2f}",
-            f"{float(row['expense']):.2f}",
-            f"{float(row['balance']):.2f}",
+            _escape_reportlab(str(row["month"])),
+            f"{float(row['income'] or 0):.2f}",
+            f"{float(row['expense'] or 0):.2f}",
+            f"{float(row['balance'] or 0):.2f}",
         ]
         for row in month_rows
     ]
@@ -287,11 +296,11 @@ def _export_pdf(
 
     movement_table_rows = [
         [
-            escape(str(row["transaction_date"])),
-            escape(_localize_transaction_type(str(row["transaction_type"]), language)),
-            escape(str(row["category"])),
-            f"{float(row['amount']):.2f}",
-            escape(str(row["description"])),
+            _escape_reportlab(str(row["transaction_date"])),
+            _escape_reportlab(_localize_transaction_type(str(row["transaction_type"]), language)),
+            _escape_reportlab(str(row["category"])),
+            f"{float(row['amount'] or 0):.2f}",
+            _escape_reportlab(str(row["description"])),
         ]
         for row in transactions
     ]
@@ -403,11 +412,11 @@ def _compute_summary_metrics(
         period_end = max(dates)
 
         for row in transactions:
-            amount = float(row["amount"])
+            amount = float(row["amount"] or 0)
             categories.add(str(row["category"]))
             if row["transaction_type"] == "income":
                 total_income += amount
-            else:
+            elif row["transaction_type"] == "expense":
                 total_expense += amount
 
     balance = total_income - total_expense
@@ -433,8 +442,8 @@ def _build_executive_summary(metrics: dict[str, Any], language: str) -> str:
         tr(
             language,
             "pdf_period_analyzed",
-            start=escape(str(metrics["period_start"])),
-            end=escape(str(metrics["period_end"])),
+            start=_escape_reportlab(str(metrics["period_start"])),
+            end=_escape_reportlab(str(metrics["period_end"])),
         ),
         tr(language, "pdf_transactions_count", count=metrics["transactions_count"]),
         tr(language, "pdf_income_total", amount=float(metrics["total_income"])),
@@ -442,8 +451,8 @@ def _build_executive_summary(metrics: dict[str, Any], language: str) -> str:
         tr(language, "pdf_balance_total", amount=float(metrics["balance"])),
         tr(language, "pdf_categories_count", count=metrics["categories_count"]),
         tr(language, "pdf_months_count", count=metrics["months_count"]),
-        tr(language, "pdf_top_expense", value=escape(str(metrics["top_expense"]))),
-        tr(language, "pdf_top_income", value=escape(str(metrics["top_income"]))),
+        tr(language, "pdf_top_expense", value=_escape_reportlab(str(metrics["top_expense"]))),
+        tr(language, "pdf_top_income", value=_escape_reportlab(str(metrics["top_income"]))),
     ]
     return "<br/>".join(lines)
 
@@ -505,8 +514,8 @@ def _build_cover_banner(
         + tr(
             language,
             "pdf_period",
-            start=escape(str(metrics["period_start"])),
-            end=escape(str(metrics["period_end"])),
+            start=_escape_reportlab(str(metrics["period_start"])),
+            end=_escape_reportlab(str(metrics["period_end"])),
         )
     )
     content = Paragraph(
@@ -622,14 +631,19 @@ def _draw_page_number(canvas: Any, doc: Any, language: str) -> None:
 def _compute_category_rows_from_transactions(transactions: list[dict[str, Any]]) -> list[dict[str, Any]]:
     categories: dict[str, dict[str, float]] = defaultdict(lambda: {"income": 0.0, "expense": 0.0})
     for row in transactions:
-        amount = float(row["amount"])
+        amount = float(row["amount"] or 0)
         cat = str(row["category"])
         if row["transaction_type"] == "income":
             categories[cat]["income"] += amount
-        else:
+        elif row["transaction_type"] == "expense":
             categories[cat]["expense"] += amount
     return [
-        {"category": cat, "income": data["income"], "expense": data["expense"], "balance": data["income"] - data["expense"]}
+        {
+            "category": cat,
+            "income": data["income"],
+            "expense": data["expense"],
+            "balance": data["income"] - data["expense"],
+        }
         for cat, data in sorted(categories.items())
     ]
 
@@ -637,14 +651,19 @@ def _compute_category_rows_from_transactions(transactions: list[dict[str, Any]])
 def _compute_month_rows_from_transactions(transactions: list[dict[str, Any]]) -> list[dict[str, Any]]:
     months: dict[str, dict[str, float]] = defaultdict(lambda: {"income": 0.0, "expense": 0.0})
     for row in transactions:
-        amount = float(row["amount"])
+        amount = float(row["amount"] or 0)
         month = str(row["transaction_date"])[:7]
         if row["transaction_type"] == "income":
             months[month]["income"] += amount
-        else:
+        elif row["transaction_type"] == "expense":
             months[month]["expense"] += amount
     return [
-        {"month": month, "income": data["income"], "expense": data["expense"], "balance": data["income"] - data["expense"]}
+        {
+            "month": month,
+            "income": data["income"],
+            "expense": data["expense"],
+            "balance": data["income"] - data["expense"],
+        }
         for month, data in sorted(months.items())
     ]
 
@@ -718,7 +737,7 @@ def _export_html(
 
     if category_rows:
         categories = [str(row["category"]) for row in category_rows]
-        balances = [float(row["balance"]) for row in category_rows]
+        balances = [float(row["balance"] or 0) for row in category_rows]
         fig.add_trace(
             go.Bar(x=categories, y=balances, marker_color="steelblue", name=tr(language, "pdf_col_balance")),
             row=1,
@@ -727,8 +746,8 @@ def _export_html(
 
     if month_rows:
         months = [str(row["month"]) for row in month_rows]
-        incomes = [float(row["income"]) for row in month_rows]
-        expenses = [float(row["expense"]) for row in month_rows]
+        incomes = [float(row["income"] or 0) for row in month_rows]
+        expenses = [float(row["expense"] or 0) for row in month_rows]
         fig.add_trace(
             go.Scatter(x=months, y=incomes, mode="lines+markers", name=tr(language, "pdf_col_income")),
             row=2,
@@ -802,10 +821,10 @@ def _export_monthly_pdf(
 
     category_table_rows = [
         [
-            escape(str(row["category"])),
-            f"{float(row['income']):.2f}",
-            f"{float(row['expense']):.2f}",
-            f"{float(row['balance']):.2f}",
+            _escape_reportlab(str(row["category"])),
+            f"{float(row['income'] or 0):.2f}",
+            f"{float(row['expense'] or 0):.2f}",
+            f"{float(row['balance'] or 0):.2f}",
         ]
         for row in month_category_rows
     ]
@@ -828,11 +847,11 @@ def _export_monthly_pdf(
 
     movement_table_rows = [
         [
-            escape(str(row["transaction_date"])),
-            escape(_localize_transaction_type(str(row["transaction_type"]), language)),
-            escape(str(row["category"])),
-            f"{float(row['amount']):.2f}",
-            escape(str(row["description"])),
+            _escape_reportlab(str(row["transaction_date"])),
+            _escape_reportlab(_localize_transaction_type(str(row["transaction_type"]), language)),
+            _escape_reportlab(str(row["category"])),
+            f"{float(row['amount'] or 0):.2f}",
+            _escape_reportlab(str(row["description"])),
         ]
         for row in month_transactions
     ]

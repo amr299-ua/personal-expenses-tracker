@@ -7,8 +7,6 @@ and the services layer.
 from __future__ import annotations
 
 from datetime import date
-from typing import Any
-
 
 INCOME_CATEGORY_KEYS = [
     "salary",
@@ -82,12 +80,16 @@ def filter_transaction_rows(
     filtered: list[dict[str, object]] = []
     for row in rows:
         row_type = str(row["transaction_type"]).lower()
-        row_category = str(row["category"]).lower()
+        row_category = str(row["category"]).strip().lower()
         row_date = safe_parse_date(str(row["transaction_date"]))
 
         if selected_type_db and row_type != selected_type_db:
             continue
         if normalized_category != normalized_all_label and row_category != normalized_category:
+            continue
+        if date_from and not row_date:
+            continue
+        if date_to and not row_date:
             continue
         if date_from and row_date and row_date < date_from:
             continue

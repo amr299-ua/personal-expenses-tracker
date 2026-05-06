@@ -1,11 +1,10 @@
 from __future__ import annotations
 
 import argparse
+import logging
 import sys
 from datetime import date
 from typing import Any
-
-import logging
 
 from expenses_tracker.charts import generate_charts
 from expenses_tracker.db import ExpenseDatabase, TransactionInput
@@ -94,6 +93,7 @@ def _build_parser(language: str) -> argparse.ArgumentParser:
 
 
 def main() -> int:
+    """Entry point for the CLI application."""
     pre_parser = argparse.ArgumentParser(add_help=False)
     pre_parser.add_argument("--lang", default="en")
     pre_parser.add_argument("--list-languages", action="store_true")

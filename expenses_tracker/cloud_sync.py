@@ -3,8 +3,10 @@ from __future__ import annotations
 import json
 from abc import ABC, abstractmethod
 from datetime import datetime, timezone
-from pathlib import Path
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 from expenses_tracker.security import DatabaseEncryption
 
@@ -42,16 +44,20 @@ class WebDAVProvider(CloudProvider):
         })
 
     def upload(self, local_path: Path, remote_path: str) -> None:
+        """Upload a local file to WebDAV."""
         self.client.upload_sync(remote_path=remote_path, local_path=str(local_path))
 
     def download(self, remote_path: str, local_path: Path) -> None:
+        """Download a file from WebDAV to a local path."""
         self.client.download_sync(remote_path=remote_path, local_path=str(local_path))
 
     def list_files(self, remote_dir: str) -> list[dict[str, Any]]:
+        """List files in a remote WebDAV directory."""
         items = self.client.list(remote_dir)
         return [{"name": item} for item in items]
 
     def delete(self, remote_path: str) -> None:
+        """Delete a file from WebDAV."""
         self.client.clean(remote_path)
 
 
@@ -59,25 +65,30 @@ class DropboxProvider(CloudProvider):
     """Dropbox sync using API v2."""
 
     def __init__(self, access_token: str) -> None:
-        import dropbox
+        import dropbox as _dropbox
 
-        self.dbx = dropbox.Dropbox(access_token)
+        self._dropbox = _dropbox
+        self.dbx = _dropbox.Dropbox(access_token)
 
     def upload(self, local_path: Path, remote_path: str) -> None:
+        """Upload a local file to Dropbox."""
         with open(local_path, "rb") as f:
             self.dbx.files_upload(
-                f.read(), remote_path, mode=dropbox.files.WriteMode.overwrite  # type: ignore[name-defined]
+                f.read(), remote_path, mode=self._dropbox.files.WriteMode.overwrite
             )
 
     def download(self, remote_path: str, local_path: Path) -> None:
+        """Download a file from Dropbox to a local path."""
         metadata, result = self.dbx.files_download(remote_path)
         local_path.write_bytes(result.content)
 
     def list_files(self, remote_dir: str) -> list[dict[str, Any]]:
+        """List files in a remote Dropbox directory."""
         result = self.dbx.files_list_folder(remote_dir)
         return [{"name": entry.name, "path": entry.path_lower} for entry in result.entries]
 
     def delete(self, remote_path: str) -> None:
+        """Delete a file from Dropbox."""
         self.dbx.files_delete_v2(remote_path)
 
 
@@ -86,25 +97,29 @@ class GoogleDriveProvider(CloudProvider):
 
     def __init__(self, credentials_path: str) -> None:
         from google.oauth2.credentials import Credentials
-        from googleapiclient.discovery import build  # type: ignore[import-not-found]
+        from googleapiclient.discovery import build
 
         creds = Credentials.from_authorized_user_file(credentials_path, ["https://www.googleapis.com/auth/drive"])
         self.service = build("drive", "v3", credentials=creds)
 
     def upload(self, local_path: Path, remote_path: str) -> None:
+        """Upload a local file to Google Drive."""
         file_metadata = {"name": remote_path}
-        media = self.service.files().create(body=file_metadata, media_body=str(local_path), fields="id").execute()
+        self.service.files().create(body=file_metadata, media_body=str(local_path), fields="id").execute()
 
     def download(self, remote_path: str, local_path: Path) -> None:
+        """Download a file from Google Drive to a local path."""
         file_id = self._get_file_id(remote_path)
         request = self.service.files().get_media(fileId=file_id)
         local_path.write_bytes(request.execute())
 
     def list_files(self, remote_dir: str) -> list[dict[str, Any]]:
+        """List files in a remote Google Drive directory."""
         results = self.service.files().list(q=f"name contains '{remote_dir}'", fields="files(id, name)").execute()
         return [{"name": f["name"], "id": f["id"]} for f in results.get("files", [])]
 
     def delete(self, remote_path: str) -> None:
+        """Delete a file from Google Drive."""
         file_id = self._get_file_id(remote_path)
         self.service.files().delete(fileId=file_id).execute()
 
@@ -113,7 +128,7 @@ class GoogleDriveProvider(CloudProvider):
         files = results.get("files", [])
         if not files:
             raise FileNotFoundError(f"Google Drive file not found: {name}")
-        return cast(str, files[0]["id"])
+        return cast("str", files[0]["id"])
 
 
 class CloudSyncManager:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import contextlib
 import json
 import os
 import secrets
@@ -25,6 +26,7 @@ MAX_BACKUPS = 10
 
 
 def apply_private_permissions(path: str | Path, *, directory: bool = False) -> None:
+    """Set restrictive file or directory permissions on Unix systems."""
     mode = 0o700 if directory else 0o600
     try:
         os.chmod(path, mode)
@@ -33,7 +35,8 @@ def apply_private_permissions(path: str | Path, *, directory: bool = False) -> N
 
 
 def sanitize_spreadsheet_text(value: Any) -> str:
-    text = cast(str, ILLEGAL_CHARACTERS_RE.sub("", str(value)))
+    """Remove illegal characters and prefix formula-starting values with apostrophe."""
+    text = cast("str", ILLEGAL_CHARACTERS_RE.sub("", str(value)))
     stripped = text.lstrip()
     if stripped.startswith(SPREADSHEET_FORMULA_PREFIXES):
         return "'" + text
@@ -41,11 +44,14 @@ def sanitize_spreadsheet_text(value: Any) -> str:
 
 
 class KeyDerivation:
+    """PBKDF2-HMAC-SHA256 key derivation utilities."""
+
     ITERATIONS = 600_000
     SALT_SIZE = 32
 
     @staticmethod
     def derive_key(password: str, salt: bytes | None = None) -> tuple[bytes, bytes]:
+        """Derive a Fernet-compatible key from a password and optional salt."""
         if salt is None:
             salt = os.urandom(KeyDerivation.SALT_SIZE)
         kdf = PBKDF2HMAC(
@@ -59,29 +65,35 @@ class KeyDerivation:
 
     @staticmethod
     def hash_password(password: str) -> str:
+        """Hash a password with a random salt and return salt:key string."""
         salt = os.urandom(KeyDerivation.SALT_SIZE)
         key, _ = KeyDerivation.derive_key(password, salt)
         return base64.urlsafe_b64encode(salt).decode() + ":" + key.decode()
 
 
 def verify_password(password: str, stored_hash: str) -> bool:
+    """Verify a password against a stored salt:key hash using constant-time comparison."""
     try:
         salt_b64, stored_key_b64 = stored_hash.split(":", 1)
         salt = base64.urlsafe_b64decode(salt_b64)
         derived_key, _ = KeyDerivation.derive_key(password, salt)
         stored_key = stored_key_b64.encode()
         return secrets.compare_digest(derived_key, stored_key)
-    except (ValueError, Exception):
+    except Exception:
         return False
 
 
 class LockManager:
+    """PIN-based application lock management."""
+
     @staticmethod
     def is_lock_set() -> bool:
+        """Return True if a lock file exists."""
         return LOCK_FILE.exists()
 
     @staticmethod
     def set_lock(password: str) -> None:
+        """Create a lock file with the hashed password."""
         DATA_DIR.mkdir(parents=True, exist_ok=True)
         hash_value = KeyDerivation.hash_password(password)
         LOCK_FILE.write_text(hash_value, encoding="utf-8")
@@ -89,6 +101,7 @@ class LockManager:
 
     @staticmethod
     def verify(password: str) -> bool:
+        """Verify a password against the stored lock hash."""
         if not LOCK_FILE.exists():
             return False
         stored_hash = LOCK_FILE.read_text(encoding="utf-8").strip()
@@ -96,19 +109,20 @@ class LockManager:
 
     @staticmethod
     def remove_lock() -> None:
-        try:
+        """Remove the lock file if it exists."""
+        with contextlib.suppress(OSError):
             LOCK_FILE.unlink()
-        except OSError:
-            pass
 
     @staticmethod
     def set_lock_from_hash(hash_value: str) -> None:
+        """Create a lock file from a pre-computed hash."""
         DATA_DIR.mkdir(parents=True, exist_ok=True)
         LOCK_FILE.write_text(hash_value, encoding="utf-8")
         apply_private_permissions(LOCK_FILE)
 
     @staticmethod
     def change_password(current_password: str, new_password: str) -> bool:
+        """Change the lock password if the current one is valid."""
         if not LockManager.verify(current_password):
             return False
         LockManager.set_lock(new_password)
@@ -129,15 +143,16 @@ class LockManager:
     @staticmethod
     def deactivate_lock() -> None:
         """Deactivate the startup lock (keeps PIN stored)."""
-        try:
+        with contextlib.suppress(OSError):
             LOCK_ACTIVE_FILE.unlink()
-        except OSError:
-            pass
 
 
 class DatabaseEncryption:
+    """Fernet-based file encryption for database files."""
+
     @staticmethod
     def encrypt_file(source_path: Path, key: bytes) -> Path:
+        """Encrypt a file and write the .enc version alongside it."""
         fernet = Fernet(key)
         data = source_path.read_bytes()
         encrypted = fernet.encrypt(data)
@@ -148,29 +163,35 @@ class DatabaseEncryption:
 
     @staticmethod
     def decrypt_file(enc_path: Path, key: bytes, output_path: Path | None = None) -> Path:
+        """Decrypt an encrypted file and write the plaintext version."""
         fernet = Fernet(key)
         encrypted = enc_path.read_bytes()
         decrypted = fernet.decrypt(encrypted)
         if output_path is None:
-            output_path = Path(str(enc_path).rstrip(".enc"))
+            output_path = Path(str(enc_path).removesuffix(".enc"))
         output_path.write_bytes(decrypted)
         apply_private_permissions(output_path)
         return output_path
 
     @staticmethod
     def is_encrypted(db_path: Path) -> bool:
+        """Return True if an encrypted version exists and plaintext does not."""
         return Path(str(db_path) + ".enc").exists() and not db_path.exists()
 
 
 class BackupManager:
+    """Database backup creation, rotation and restoration."""
+
     @staticmethod
     def ensure_backup_dir() -> Path:
+        """Create the backups directory if it does not exist."""
         BACKUPS_DIR.mkdir(parents=True, exist_ok=True)
         apply_private_permissions(BACKUPS_DIR, directory=True)
         return BACKUPS_DIR
 
     @staticmethod
     def create_backup(db_path: str | Path = "data/expenses.db") -> Path:
+        """Create a timestamped backup and rotate old ones."""
         source = Path(db_path)
         if not source.exists():
             raise FileNotFoundError(f"Database not found: {source}")
@@ -188,6 +209,7 @@ class BackupManager:
 
     @staticmethod
     def rotate_backups(max_backups: int = MAX_BACKUPS) -> list[Path]:
+        """Remove oldest backups exceeding the maximum count."""
         if not BACKUPS_DIR.exists():
             return []
         backups = sorted(
@@ -206,6 +228,7 @@ class BackupManager:
 
     @staticmethod
     def list_backups() -> list[dict[str, Any]]:
+        """Return metadata for all available backups."""
         if not BACKUPS_DIR.exists():
             return []
         backups = []
@@ -221,6 +244,7 @@ class BackupManager:
 
     @staticmethod
     def restore_backup(backup_name: str, db_path: str | Path = "data/expenses.db") -> Path:
+        """Restore the database from a named backup file."""
         backup_file = BACKUPS_DIR / backup_name
         if not backup_file.exists():
             raise FileNotFoundError(f"Backup not found: {backup_file}")
@@ -232,6 +256,8 @@ class BackupManager:
 
 
 class AuditLog:
+    """JSONL-based file audit logging."""
+
     LOG_FILE = DATA_DIR / "audit_log.jsonl"
 
     ACTION_CREATE = "create"
@@ -245,6 +271,7 @@ class AuditLog:
 
     @staticmethod
     def log(action: str, entity: str = "", entity_id: int | None = None, details: str = "") -> None:
+        """Append an audit entry to the JSONL log file."""
         DATA_DIR.mkdir(parents=True, exist_ok=True)
         entry = {
             "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -255,9 +282,11 @@ class AuditLog:
         }
         with open(AuditLog.LOG_FILE, "a", encoding="utf-8") as f:
             f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+        apply_private_permissions(AuditLog.LOG_FILE)
 
     @staticmethod
     def get_entries(limit: int = 100) -> list[dict[str, Any]]:
+        """Return the most recent audit log entries."""
         if not AuditLog.LOG_FILE.exists():
             return []
         entries = []
@@ -273,13 +302,14 @@ class AuditLog:
 
     @staticmethod
     def clear() -> None:
-        try:
+        """Delete the audit log file."""
+        with contextlib.suppress(OSError):
             AuditLog.LOG_FILE.unlink()
-        except OSError:
-            pass
 
 
 class SQLCipherManager:
+    """SQLCipher database encryption management."""
+
     KEY_FILE = DATA_DIR / ".dbkey"
 
     @staticmethod
@@ -287,17 +317,18 @@ class SQLCipherManager:
         """Detect whether the database is already encrypted with SQLCipher."""
         if not db_path.exists():
             return False
-        try:
-            import sqlite3
+        import sqlite3
 
-            conn = sqlite3.connect(str(db_path))
+        conn = sqlite3.connect(str(db_path))
+        try:
             cursor = conn.cursor()
             cursor.execute("SELECT name FROM sqlite_master WHERE type='table' LIMIT 1")
             cursor.fetchone()
-            conn.close()
             return False
         except Exception:
             return True
+        finally:
+            conn.close()
 
     @staticmethod
     def generate_key() -> str:
@@ -338,7 +369,10 @@ class SQLCipherManager:
         try:
             from pysqlcipher3 import dbapi2 as sqlite
         except ImportError as exc:
-            raise ImportError("pysqlcipher3 is required for database encryption. Install it with: pip install pysqlcipher3") from exc
+            raise ImportError(
+                "pysqlcipher3 is required for database encryption. "
+                "Install it with: pip install pysqlcipher3"
+            ) from exc
 
         if not db_path.exists():
             raise FileNotFoundError(f"Database not found: {db_path}")
@@ -355,14 +389,19 @@ class SQLCipherManager:
         source_conn.execute("DETACH DATABASE encrypted")
         source_conn.close()
 
-        # Replace original with encrypted version
-        db_path.unlink()
-        shutil.move(str(temp_encrypted), str(db_path))
+        # Replace original with encrypted version (atomic rename)
+        backup_path = db_path.with_suffix(".db.bak")
+        db_path.rename(backup_path)
+        try:
+            shutil.move(str(temp_encrypted), str(db_path))
+            backup_path.unlink(missing_ok=True)
+        except Exception:
+            backup_path.rename(db_path)
+            raise
         apply_private_permissions(db_path)
 
     @staticmethod
     def remove_key_file() -> None:
-        try:
+        """Remove the stored SQLCipher key file."""
+        with contextlib.suppress(OSError):
             SQLCipherManager.KEY_FILE.unlink()
-        except OSError:
-            pass

@@ -1,21 +1,17 @@
-"""Add budgets table
+"""Add budgets table.
 
 Revision ID: ced4bd2deb17
 Revises: 353e83e9a124
 Create Date: 2026-05-04 16:43:22.463705
 
 """
-from typing import Sequence, Union
-
-from alembic import op
-import sqlalchemy as sa
-
+from collections.abc import Sequence
 
 # revision identifiers, used by Alembic.
 revision: str = 'ced4bd2deb17'
-down_revision: Union[str, Sequence[str], None] = '353e83e9a124'
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+down_revision: str | Sequence[str] | None = '353e83e9a124'
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:

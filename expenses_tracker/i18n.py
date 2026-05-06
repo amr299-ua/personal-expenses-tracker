@@ -19,7 +19,7 @@ def _load_locale_file(language: str) -> dict[str, Any] | None:
     if not path.exists():
         return None
     with open(path, encoding="utf-8") as f:
-        return cast(dict[str, Any], json.load(f))
+        return cast("dict[str, Any]", json.load(f))
 
 
 def _ensure_loaded(language: str) -> None:
@@ -52,6 +52,7 @@ SUPPORTED_LANGUAGES: dict[str, str] = _build_supported_languages()
 
 
 def reload_translations() -> dict[str, str]:
+    """Reload all locale files from disk and return supported languages."""
     global SUPPORTED_LANGUAGES
     _cache_meta.clear()
     _cache_translations.clear()
@@ -61,6 +62,7 @@ def reload_translations() -> dict[str, str]:
 
 
 def normalize_language(language: str | None) -> str:
+    """Normalize a language code to a supported value or default."""
     if language is None:
         return DEFAULT_LANGUAGE
 
@@ -71,16 +73,19 @@ def normalize_language(language: str | None) -> str:
 
 
 def list_languages() -> list[tuple[str, str]]:
+    """Return sorted list of (code, name) tuples for supported languages."""
     return sorted(SUPPORTED_LANGUAGES.items(), key=lambda item: item[0])
 
 
 def language_label(code: str) -> str:
+    """Return a display label like 'English (en)' for a language code."""
     normalized = normalize_language(code)
     name = SUPPORTED_LANGUAGES.get(normalized, normalized)
     return f"{name} ({normalized})"
 
 
 def tr(language: str | None, key: str, **kwargs: Any) -> str:
+    """Translate a key for the given language, with optional format kwargs."""
     normalized = normalize_language(language)
     _ensure_loaded(normalized)
 
@@ -99,11 +104,13 @@ def tr(language: str | None, key: str, **kwargs: Any) -> str:
 
 
 def month_name(language: str | None, month_number: int) -> str:
+    """Return the localized name for a month number (1-12)."""
     key = f"calendar_m{month_number}"
     return tr(language, key)
 
 
 def get_locale_config(language: str | None) -> dict[str, Any]:
+    """Return locale formatting configuration for a language."""
     normalized = normalize_language(language)
     _ensure_loaded(normalized)
     meta = _cache_meta.get(normalized, {})
@@ -116,6 +123,7 @@ def get_locale_config(language: str | None) -> dict[str, Any]:
 
 
 def is_rtl(language: str | None) -> bool:
+    """Return True if the language uses right-to-left text direction."""
     config = get_locale_config(language)
     return bool(config.get("rtl", False))
 
@@ -133,12 +141,13 @@ def reshape_for_rtl(text: str) -> str:
         from bidi.algorithm import get_display
 
         reshaped = arabic_reshaper.reshape(text)
-        return cast(str, get_display(reshaped))
+        return cast("str", get_display(reshaped))
     except Exception:
         return text
 
 
 def format_date(language: str | None, d: date | datetime) -> str:
+    """Format a date according to the locale's date format pattern."""
     config = get_locale_config(language)
 
     if isinstance(d, datetime):
@@ -148,7 +157,7 @@ def format_date(language: str | None, d: date | datetime) -> str:
     month = f"{d.month:02d}"
     day = f"{d.day:02d}"
 
-    fmt = cast(str, config["date_format"])
+    fmt = cast("str", config["date_format"])
     return fmt.replace("YYYY", year).replace("MM", month).replace("DD", day)
 
 
@@ -157,14 +166,12 @@ def format_number(
     value: float | int,
     decimals: int = 2,
 ) -> str:
+    """Format a number with locale-specific separators."""
     config = get_locale_config(language)
     dec_sep = config["decimal_separator"]
     thou_sep = config["thousands_separator"]
 
-    if decimals > 0:
-        raw = f"{abs(value):.{decimals}f}"
-    else:
-        raw = f"{abs(int(value))}"
+    raw = f"{abs(value):.{decimals}f}"
 
     parts = raw.split(".")
     integer_part = parts[0]
