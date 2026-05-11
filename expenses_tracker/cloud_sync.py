@@ -112,10 +112,8 @@ class GoogleDriveProvider(CloudProvider):
         from google.oauth2.credentials import Credentials
         from googleapiclient.discovery import build
 
-        credentials_cls: Any = Credentials
-        creds = cast(
-            "Any",
-            credentials_cls.from_authorized_user_file(credentials_path, ["https://www.googleapis.com/auth/drive"]),
+        creds = Credentials.from_authorized_user_file(  # type: ignore[no-untyped-call]
+            credentials_path, ["https://www.googleapis.com/auth/drive"]
         )
         self.service = build("drive", "v3", credentials=creds)
 
