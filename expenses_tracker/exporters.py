@@ -13,10 +13,13 @@ from xml.sax.saxutils import escape
 def _escape_reportlab(value: str) -> str:
     """Escape text for ReportLab Paragraph content, stripping HTML tags."""
     import re
+
     text = re.sub(r"<[^>]+>", "", value)
     text = escape(text)
     return text
 
+
+import matplotlib.pyplot as plt
 import yaml
 from openpyxl import Workbook
 from reportlab.lib import colors
@@ -103,6 +106,7 @@ def _figure_to_image(figure: Any, width: int = 500, dpi: int = 150) -> RLImage:
     """Convert a matplotlib Figure to a ReportLab Image without disk I/O."""
     buf = io.BytesIO()
     figure.savefig(buf, format="png", dpi=dpi, bbox_inches="tight")
+    plt.close(figure)
     buf.seek(0)
     img = RLImage(buf, width=width, height=width * 0.5)
     return img
@@ -319,12 +323,14 @@ def _export_pdf(
 
     for chart_key in ["line", "bar", "pie", "scatter", "bar3d", "forecast", "sankey"]:
         if chart_key in figures:
-            elements.extend(_build_chart_section(
-                figures[chart_key],
-                chart_title_map[chart_key],
-                styles,
-                language,
-            ))
+            elements.extend(
+                _build_chart_section(
+                    figures[chart_key],
+                    chart_title_map[chart_key],
+                    styles,
+                    language,
+                )
+            )
 
     # 5. Budget section (if data provided)
     if budget_rows:
@@ -663,36 +669,42 @@ def _build_budget_section(
         delta = planned - actual
         compliance = ((planned - actual) / planned * 100) if planned > 0 else 0
         status = tr(language, "pdf_budget_ok") if delta >= 0 else tr(language, "pdf_budget_exceeded")
-        rows.append([
-            _escape_reportlab(str(row.get("category", ""))),
-            f"{planned:.2f}",
-            f"{actual:.2f}",
-            f"{delta:.2f}",
-            f"{compliance:.0f}% - {status}",
-        ])
+        rows.append(
+            [
+                _escape_reportlab(str(row.get("category", ""))),
+                f"{planned:.2f}",
+                f"{actual:.2f}",
+                f"{delta:.2f}",
+                f"{compliance:.0f}% - {status}",
+            ]
+        )
 
     table_data = [header, *rows]
     table = Table(table_data, colWidths=[120, 80, 80, 80, 120], repeatRows=1)
-    table.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1f3a5f")),
-        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
-        ("ALIGN", (0, 0), (-1, 0), "CENTER"),
-        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-        ("FONTSIZE", (0, 0), (-1, 0), 10),
-        ("BOTTOMPADDING", (0, 0), (-1, 0), 8),
-        ("TOPPADDING", (0, 0), (-1, 0), 8),
-        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.HexColor("#f5f8fc"), colors.white]),
-        ("ALIGN", (0, 1), (-1, -1), "RIGHT"),
-        ("ALIGN", (0, 1), (0, -1), "LEFT"),
-        ("FONTNAME", (0, 1), (-1, -1), "Helvetica"),
-        ("FONTSIZE", (0, 1), (-1, -1), 9),
-        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-        ("GRID", (0, 0), (-1, -1), 0.3, colors.HexColor("#b8c4d6")),
-        ("LEFTPADDING", (0, 0), (-1, -1), 6),
-        ("RIGHTPADDING", (0, 0), (-1, -1), 6),
-        ("TOPPADDING", (0, 1), (-1, -1), 5),
-        ("BOTTOMPADDING", (0, 1), (-1, -1), 5),
-    ]))
+    table.setStyle(
+        TableStyle(
+            [
+                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1f3a5f")),
+                ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+                ("ALIGN", (0, 0), (-1, 0), "CENTER"),
+                ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                ("FONTSIZE", (0, 0), (-1, 0), 10),
+                ("BOTTOMPADDING", (0, 0), (-1, 0), 8),
+                ("TOPPADDING", (0, 0), (-1, 0), 8),
+                ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.HexColor("#f5f8fc"), colors.white]),
+                ("ALIGN", (0, 1), (-1, -1), "RIGHT"),
+                ("ALIGN", (0, 1), (0, -1), "LEFT"),
+                ("FONTNAME", (0, 1), (-1, -1), "Helvetica"),
+                ("FONTSIZE", (0, 1), (-1, -1), 9),
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                ("GRID", (0, 0), (-1, -1), 0.3, colors.HexColor("#b8c4d6")),
+                ("LEFTPADDING", (0, 0), (-1, -1), 6),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+                ("TOPPADDING", (0, 1), (-1, -1), 5),
+                ("BOTTOMPADDING", (0, 1), (-1, -1), 5),
+            ]
+        )
+    )
 
     elements.append(table)
     elements.append(Spacer(1, 10))
@@ -1243,12 +1255,14 @@ def _export_monthly_pdf(
     }
     for chart_key in ["line", "bar", "pie", "scatter", "bar3d", "forecast", "sankey"]:
         if chart_key in figures:
-            elements.extend(_build_chart_section(
-                figures[chart_key],
-                chart_title_map[chart_key],
-                styles,
-                language,
-            ))
+            elements.extend(
+                _build_chart_section(
+                    figures[chart_key],
+                    chart_title_map[chart_key],
+                    styles,
+                    language,
+                )
+            )
 
     # Budget section for this month
     if budget_rows:
@@ -1317,9 +1331,7 @@ def _export_monthly_pdf(
     )
 
 
-def _build_monthly_cover_banner(
-    year_month: str, styles: dict[str, ParagraphStyle], language: str
-) -> Table:
+def _build_monthly_cover_banner(year_month: str, styles: dict[str, ParagraphStyle], language: str) -> Table:
     subtitle = (
         tr(language, "pdf_generated", timestamp=datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
         + "<br/>"

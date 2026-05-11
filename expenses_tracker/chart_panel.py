@@ -92,12 +92,14 @@ class EmbeddedChartPanel:
         income_values = [float(r["income"]) for r in rows]
         x = range(len(categories))
         axis.bar(
-            x, income_values,
+            x,
+            income_values,
             label=tr(self._language, "legend_income"),
             color=self._colors["positive"],
         )
         axis.bar(
-            x, expense_values,
+            x,
+            expense_values,
             label=tr(self._language, "legend_expense"),
             color=self._colors["negative"],
             alpha=0.85,
@@ -131,22 +133,29 @@ class EmbeddedChartPanel:
         balance_values = [float(r["balance"]) for r in rows]
         if self._show_income.get():
             axis.plot(
-                months, income_values, marker="o",
+                months,
+                income_values,
+                marker="o",
                 label=tr(self._language, "legend_income"),
                 color=self._colors["positive"],
             )
         if self._show_expense.get():
             axis.plot(
-                months, expense_values, marker="o",
+                months,
+                expense_values,
+                marker="o",
                 label=tr(self._language, "legend_expense"),
                 color=self._colors["negative"],
             )
         if self._show_balance.get():
             axis.plot(
-                months, balance_values, marker="o",
+                months,
+                balance_values,
+                marker="o",
                 label=tr(self._language, "legend_balance"),
                 color=self._colors["accent"],
             )
+        axis.set_xticks(range(len(months)))
         axis.set_xticklabels(months, rotation=30, ha="right", fontsize=8)
         if any([self._show_income.get(), self._show_expense.get(), self._show_balance.get()]):
             axis.legend(fontsize=8)
@@ -193,9 +202,7 @@ class EmbeddedChartPanel:
                 tooltip.withdraw()
                 return
             found = False
-            for bar, cat, inc, exp in zip(
-                axis.patches, categories, income_values, expense_values, strict=False
-            ):
+            for bar, cat, inc, exp in zip(axis.patches, categories, income_values, expense_values, strict=False):
                 if bar.contains_point((event.x, event.y), radius=5):
                     text = (
                         f"{cat}\n"

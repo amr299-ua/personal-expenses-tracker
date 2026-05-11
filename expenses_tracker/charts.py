@@ -192,9 +192,7 @@ def _resolve_chart_kinds(kind: str) -> set[str]:
 # ---------------------------------------------------------------------------
 
 
-def category_totals_figure(
-    rows: list[dict[str, Any]], language: str, colors: dict[str, Any]
-) -> Figure:
+def category_totals_figure(rows: list[dict[str, Any]], language: str, colors: dict[str, Any]) -> Figure:
     """Create a bar chart figure for category income vs expense."""
     categories = [str(row["category"]) for row in rows]
     income = [float(row["income"]) for row in rows]
@@ -218,9 +216,7 @@ def category_totals_figure(
     return figure
 
 
-def month_totals_figure(
-    rows: list[dict[str, Any]], language: str, colors: dict[str, Any]
-) -> Figure:
+def month_totals_figure(rows: list[dict[str, Any]], language: str, colors: dict[str, Any]) -> Figure:
     """Create a line chart figure for monthly income, expense and balance."""
     months = [str(row["month"]) for row in rows]
     income = [float(row["income"]) for row in rows]
@@ -244,9 +240,7 @@ def month_totals_figure(
     return figure
 
 
-def category_pie_figure(
-    rows: list[dict[str, Any]], language: str, colors: dict[str, Any]
-) -> Figure:
+def category_pie_figure(rows: list[dict[str, Any]], language: str, colors: dict[str, Any]) -> Figure:
     """Create pie chart figures for income and expense distribution."""
     categories = [str(row["category"]) for row in rows]
     income = [float(row["income"]) for row in rows]
@@ -295,9 +289,7 @@ def category_pie_figure(
     return figure
 
 
-def month_scatter_figure(
-    rows: list[dict[str, Any]], language: str, colors: dict[str, Any]
-) -> Figure:
+def month_scatter_figure(rows: list[dict[str, Any]], language: str, colors: dict[str, Any]) -> Figure:
     """Create a scatter plot figure for monthly totals."""
     months = [str(row["month"]) for row in rows]
     income = [float(row["income"]) for row in rows]
@@ -324,9 +316,7 @@ def month_scatter_figure(
     return figure
 
 
-def month_bars_3d_figure(
-    rows: list[dict[str, Any]], language: str, colors: dict[str, Any]
-) -> Figure:
+def month_bars_3d_figure(rows: list[dict[str, Any]], language: str, colors: dict[str, Any]) -> Figure:
     """Create a 3D bar chart figure for monthly income and expense."""
     months = [str(row["month"]) for row in rows]
     income = np.array([float(row["income"]) for row in rows], dtype=float)
@@ -340,12 +330,10 @@ def month_bars_3d_figure(
     axis = figure.add_subplot(111, projection="3d")
 
     axis.bar3d(
-        x_positions, np.zeros_like(x_positions), np.zeros_like(x_positions),
-        dx, dy, income, color=colors["income"]
+        x_positions, np.zeros_like(x_positions), np.zeros_like(x_positions), dx, dy, income, color=colors["income"]
     )
     axis.bar3d(
-        x_positions, np.ones_like(x_positions), np.zeros_like(x_positions),
-        dx, dy, expense, color=colors["expense"]
+        x_positions, np.ones_like(x_positions), np.zeros_like(x_positions), dx, dy, expense, color=colors["expense"]
     )
 
     axis.set_xticks(x_positions + 0.17)
@@ -361,9 +349,7 @@ def month_bars_3d_figure(
     return figure
 
 
-def forecast_figure(
-    rows: list[dict[str, Any]], language: str, colors: dict[str, Any]
-) -> Figure:
+def forecast_figure(rows: list[dict[str, Any]], language: str, colors: dict[str, Any]) -> Figure:
     """Create a forecast figure with linear trend extrapolation."""
     months = [str(row["month"]) for row in rows]
     expense = np.array([float(row["expense"]) for row in rows], dtype=float)
@@ -396,9 +382,7 @@ def forecast_figure(
     return figure
 
 
-def sankey_figure(
-    rows: list[dict[str, Any]], language: str, colors: dict[str, Any]
-) -> Figure:
+def sankey_figure(rows: list[dict[str, Any]], language: str, colors: dict[str, Any]) -> Figure:
     """Create a Sankey diagram figure for income/expense flow."""
     total_income = sum(float(row["income"]) for row in rows)
     total_expense = sum(float(row["expense"]) for row in rows)
@@ -429,9 +413,7 @@ def sankey_figure(
     return figure
 
 
-def budget_comparison_figure(
-    rows: list[dict[str, Any]], language: str, colors: dict[str, Any]
-) -> Figure:
+def budget_comparison_figure(rows: list[dict[str, Any]], language: str, colors: dict[str, Any]) -> Figure:
     """Create a grouped bar chart comparing planned vs actual spending."""
     categories = [str(row["category"]) for row in rows]
     actual = [float(row["actual"]) for row in rows]
@@ -467,57 +449,43 @@ def _save_figure(figure: Figure, output_file: Path) -> None:
     apply_private_permissions(output_file)
 
 
-def _plot_category_totals(
-    rows: list[dict[str, Any]], output_file: Path, language: str, colors: dict[str, Any]
-) -> None:
+def _plot_category_totals(rows: list[dict[str, Any]], output_file: Path, language: str, colors: dict[str, Any]) -> None:
     figure = category_totals_figure(rows, language, colors)
     _save_figure(figure, output_file)
     plt.close(figure)
 
 
-def _plot_month_totals(
-    rows: list[dict[str, Any]], output_file: Path, language: str, colors: dict[str, Any]
-) -> None:
+def _plot_month_totals(rows: list[dict[str, Any]], output_file: Path, language: str, colors: dict[str, Any]) -> None:
     figure = month_totals_figure(rows, language, colors)
     _save_figure(figure, output_file)
     plt.close(figure)
 
 
-def _plot_category_pie(
-    rows: list[dict[str, Any]], output_file: Path, language: str, colors: dict[str, Any]
-) -> None:
+def _plot_category_pie(rows: list[dict[str, Any]], output_file: Path, language: str, colors: dict[str, Any]) -> None:
     figure = category_pie_figure(rows, language, colors)
     _save_figure(figure, output_file)
     plt.close(figure)
 
 
-def _plot_month_scatter(
-    rows: list[dict[str, Any]], output_file: Path, language: str, colors: dict[str, Any]
-) -> None:
+def _plot_month_scatter(rows: list[dict[str, Any]], output_file: Path, language: str, colors: dict[str, Any]) -> None:
     figure = month_scatter_figure(rows, language, colors)
     _save_figure(figure, output_file)
     plt.close(figure)
 
 
-def _plot_month_bars_3d(
-    rows: list[dict[str, Any]], output_file: Path, language: str, colors: dict[str, Any]
-) -> None:
+def _plot_month_bars_3d(rows: list[dict[str, Any]], output_file: Path, language: str, colors: dict[str, Any]) -> None:
     figure = month_bars_3d_figure(rows, language, colors)
     _save_figure(figure, output_file)
     plt.close(figure)
 
 
-def _plot_forecast(
-    rows: list[dict[str, Any]], output_file: Path, language: str, colors: dict[str, Any]
-) -> None:
+def _plot_forecast(rows: list[dict[str, Any]], output_file: Path, language: str, colors: dict[str, Any]) -> None:
     figure = forecast_figure(rows, language, colors)
     _save_figure(figure, output_file)
     plt.close(figure)
 
 
-def _plot_sankey(
-    rows: list[dict[str, Any]], output_file: Path, language: str, colors: dict[str, Any]
-) -> None:
+def _plot_sankey(rows: list[dict[str, Any]], output_file: Path, language: str, colors: dict[str, Any]) -> None:
     figure = sankey_figure(rows, language, colors)
     _save_figure(figure, output_file)
     plt.close(figure)

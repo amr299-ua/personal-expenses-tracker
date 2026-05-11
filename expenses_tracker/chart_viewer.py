@@ -148,6 +148,7 @@ class ChartViewerDialog(tk.Toplevel):
         output_dir = Path("reports")
         output_dir.mkdir(parents=True, exist_ok=True)
         from datetime import datetime
+
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
         path = output_dir / f"chart_{kind_key}_{timestamp}.png"
         figure.savefig(path, dpi=150)
