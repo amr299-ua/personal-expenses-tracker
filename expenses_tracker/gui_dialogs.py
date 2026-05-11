@@ -179,9 +179,7 @@ class ChartTypeDialog(tk.Toplevel):
             text=tr(self._language, "btn_generate"),
             style="Accent.TButton",
             command=self._accept,
-        ).pack(
-            side="right"
-        )
+        ).pack(side="right")
 
         self.bind("<Return>", lambda _event: self._accept())
         self.bind("<Escape>", lambda _event: self._cancel())
@@ -236,9 +234,7 @@ class LockScreenDialog(tk.Toplevel):
                 anchor="w", pady=(0, 4)
             )
         else:
-            ttk.Label(frame, text=tr(self._language, "lock_subtitle"), wraplength=280).pack(
-                anchor="w", pady=(0, 12)
-            )
+            ttk.Label(frame, text=tr(self._language, "lock_subtitle"), wraplength=280).pack(anchor="w", pady=(0, 12))
 
         self.pin_var = tk.StringVar()
         pin_entry = ttk.Entry(frame, textvariable=self.pin_var, show="\u2022", width=24)
@@ -279,13 +275,13 @@ class LockScreenDialog(tk.Toplevel):
         self.geometry(f"+{x}+{y}")
 
     def _accept(self) -> None:
-        from expenses_tracker.security import KeyDerivation, verify_password
+        from expenses_tracker.security import KeyDerivation, PinRateLimiter, PinValidator, verify_password
 
         pin = self.pin_var.get()
-        if not pin:
-            return
 
         if self._mode == "set":
+            if not pin:
+                return
             confirm = self.confirm_var.get()
             if pin != confirm:
                 messagebox.showwarning(
@@ -296,20 +292,64 @@ class LockScreenDialog(tk.Toplevel):
                 self.pin_var.set("")
                 self.confirm_var.set("")
                 return
+            is_valid, error_key = PinValidator.validate(pin)
+            if not is_valid:
+                messagebox.showwarning(
+                    tr(self._language, "error_generic"),
+                    tr(self._language, error_key),
+                    parent=self,
+                )
+                self.pin_var.set("")
+                self.confirm_var.set("")
+                return
             self.new_hash = KeyDerivation.hash_password(pin)
+            PinRateLimiter.reset()
             self.success = True
             self.destroy()
         else:
-
+            remaining = PinRateLimiter.remaining_cooldown()
+            if remaining > 0:
+                messagebox.showwarning(
+                    tr(self._language, "error_generic"),
+                    tr(self._language, "pin_too_many_attempts", seconds=remaining),
+                    parent=self,
+                )
+                return
+            if PinRateLimiter.is_locked_out():
+                messagebox.showwarning(
+                    tr(self._language, "error_generic"),
+                    tr(self._language, "pin_locked_out"),
+                    parent=self,
+                )
+                self.pin_var.set("")
+                return
+            if not pin:
+                return
             if self._current_hash and verify_password(pin, self._current_hash):
+                PinRateLimiter.reset()
                 self.success = True
                 self.destroy()
             else:
-                messagebox.showwarning(
-                    tr(self._language, "error_generic"),
-                    tr(self._language, "lock_wrong_pin"),
-                    parent=self,
-                )
+                PinRateLimiter.record_failure()
+                remaining = PinRateLimiter.remaining_cooldown()
+                if PinRateLimiter.is_locked_out():
+                    messagebox.showerror(
+                        tr(self._language, "error_generic"),
+                        tr(self._language, "pin_locked_out"),
+                        parent=self,
+                    )
+                elif remaining > 0:
+                    messagebox.showwarning(
+                        tr(self._language, "error_generic"),
+                        tr(self._language, "pin_too_many_attempts", seconds=remaining),
+                        parent=self,
+                    )
+                else:
+                    messagebox.showwarning(
+                        tr(self._language, "error_generic"),
+                        tr(self._language, "lock_wrong_pin"),
+                        parent=self,
+                    )
                 self.pin_var.set("")
                 self.focus_set()
 

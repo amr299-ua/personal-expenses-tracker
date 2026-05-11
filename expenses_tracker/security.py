@@ -15,9 +15,11 @@ from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from openpyxl.cell.cell import ILLEGAL_CHARACTERS_RE
 
+from expenses_tracker.utils import resolve_app_data_dir
+
 SPREADSHEET_FORMULA_PREFIXES = ("=", "+", "-", "@")
 
-DATA_DIR = Path("data")
+DATA_DIR = resolve_app_data_dir()
 LOCK_FILE = DATA_DIR / ".lock"
 LOCK_ACTIVE_FILE = DATA_DIR / ".lock_active"
 BACKUPS_DIR = DATA_DIR / "backups"
@@ -71,6 +73,83 @@ class KeyDerivation:
         return base64.urlsafe_b64encode(salt).decode() + ":" + key.decode()
 
 
+class CloudSyncSaltManager:
+    """Manages a persistent random salt for cloud sync key derivation.
+
+    Generates a random 32-byte salt on first use and stores it in a
+    protected file so the same PIN always derives the same encryption
+    key without relying on a hardcoded predictable salt.
+    """
+
+    SALT_FILE = DATA_DIR / ".cloud_salt"
+
+    @staticmethod
+    def get_or_create_salt() -> bytes:
+        """Return the persistent cloud sync salt, creating it if needed."""
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
+        if CloudSyncSaltManager.SALT_FILE.exists():
+            salt_b64 = CloudSyncSaltManager.SALT_FILE.read_text(encoding="utf-8").strip()
+            return base64.urlsafe_b64decode(salt_b64)
+        salt = os.urandom(KeyDerivation.SALT_SIZE)
+        CloudSyncSaltManager.SALT_FILE.write_text(base64.urlsafe_b64encode(salt).decode(), encoding="utf-8")
+        apply_private_permissions(CloudSyncSaltManager.SALT_FILE)
+        return salt
+
+
+class AppCrypto:
+    """Application-level encryption for sensitive config fields (e.g. SMTP password).
+
+    Generates a random Fernet key on first use and stores it in a protected
+    file. This key is independent of the user PIN so background automation
+    can still decrypt stored credentials.
+    """
+
+    KEY_FILE = DATA_DIR / ".appkey"
+    _ENCRYPTED_PREFIX = "ENC:"
+
+    @staticmethod
+    def _get_or_create_key() -> bytes:
+        """Return the application Fernet key, creating it if needed."""
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
+        if AppCrypto.KEY_FILE.exists():
+            try:
+                key_b64 = AppCrypto.KEY_FILE.read_text(encoding="utf-8").strip()
+                key = base64.urlsafe_b64decode(key_b64)
+                Fernet(key)  # validate the key is usable
+                return key
+            except Exception:
+                AppCrypto.KEY_FILE.unlink(missing_ok=True)
+        key = Fernet.generate_key()
+        AppCrypto.KEY_FILE.write_text(key.decode(), encoding="utf-8")
+        apply_private_permissions(AppCrypto.KEY_FILE)
+        return key
+
+    @staticmethod
+    def encrypt(value: str) -> str:
+        """Encrypt a plaintext string, returning a base64-encoded prefixed value."""
+        if not value:
+            return value
+        key = AppCrypto._get_or_create_key()
+        fernet = Fernet(key)
+        encrypted = fernet.encrypt(value.encode("utf-8"))
+        return AppCrypto._ENCRYPTED_PREFIX + base64.urlsafe_b64encode(encrypted).decode()
+
+    @staticmethod
+    def decrypt(value: str | None) -> str | None:
+        """Decrypt a previously encrypted value, or return plaintext as-is."""
+        if not value:
+            return value
+        if not value.startswith(AppCrypto._ENCRYPTED_PREFIX):
+            return value
+        try:
+            key = AppCrypto._get_or_create_key()
+            fernet = Fernet(key)
+            encrypted = base64.urlsafe_b64decode(value[len(AppCrypto._ENCRYPTED_PREFIX) :])
+            return fernet.decrypt(encrypted).decode("utf-8")
+        except Exception:
+            return None
+
+
 def verify_password(password: str, stored_hash: str) -> bool:
     """Verify a password against a stored salt:key hash using constant-time comparison."""
     try:
@@ -81,6 +160,118 @@ def verify_password(password: str, stored_hash: str) -> bool:
         return secrets.compare_digest(derived_key, stored_key)
     except Exception:
         return False
+
+
+class PinValidator:
+    """Validates PIN strength, rejecting empty or trivially weak PINs."""
+
+    MIN_LENGTH = 4
+    MAX_LENGTH = 64
+
+    _WEAK_PINS: frozenset[str] = frozenset(
+        {
+            "0000",
+            "1111",
+            "2222",
+            "3333",
+            "4444",
+            "5555",
+            "6666",
+            "7777",
+            "8888",
+            "9999",
+            "1234",
+            "4321",
+            "1212",
+            "1122",
+            "123456",
+            "password",
+            "12345678",
+            "qwerty",
+            "abc123",
+        }
+    )
+
+    @staticmethod
+    def validate(pin: str) -> tuple[bool, str]:
+        """Return (is_valid, error_message_i18n_key).
+
+        Returns (True, "") if the PIN passes all checks.
+        Returns (False, i18n_key) with a descriptive error key otherwise.
+        """
+        if not pin:
+            return False, "pin_error_empty"
+        if len(pin) < PinValidator.MIN_LENGTH:
+            return False, "pin_error_too_short"
+        if len(pin) > PinValidator.MAX_LENGTH:
+            return False, "pin_error_too_long"
+        if pin.lower() in PinValidator._WEAK_PINS:
+            return False, "pin_error_weak"
+        if len(set(pin)) == 1:
+            return False, "pin_error_repeated"
+        return True, ""
+
+
+class PinRateLimiter:
+    """Rate limiter for failed PIN unlock attempts.
+
+    Tracks failed attempts globally (across dialog instances) and applies
+    exponential backoff cooldowns. After MAX_ATTEMPTS the app requires a restart.
+    """
+
+    _failures: int = 0
+    _first_failure_time: float = 0.0
+    _lockout: bool = False
+
+    MAX_ATTEMPTS = 7
+
+    @staticmethod
+    def _cooldown_seconds(attempts: int) -> int:
+        """Return cooldown in seconds for a given number of failed attempts."""
+        if attempts < 3:
+            return 0
+        if attempts == 3:
+            return 5
+        if attempts == 4:
+            return 15
+        if attempts == 5:
+            return 30
+        return 60
+
+    @staticmethod
+    def record_failure() -> None:
+        """Record a failed PIN attempt."""
+        import time
+
+        if PinRateLimiter._failures == 0:
+            PinRateLimiter._first_failure_time = time.monotonic()
+        PinRateLimiter._failures += 1
+        if PinRateLimiter._failures >= PinRateLimiter.MAX_ATTEMPTS:
+            PinRateLimiter._lockout = True
+
+    @staticmethod
+    def remaining_cooldown() -> int:
+        """Return remaining cooldown seconds (0 if no cooldown)."""
+        if PinRateLimiter._failures == 0:
+            return 0
+        import time
+
+        elapsed = time.monotonic() - PinRateLimiter._first_failure_time
+        cooldown = PinRateLimiter._cooldown_seconds(PinRateLimiter._failures)
+        remaining = max(0, int(cooldown - elapsed))
+        return remaining
+
+    @staticmethod
+    def is_locked_out() -> bool:
+        """Return True if the app is permanently locked (requires restart)."""
+        return PinRateLimiter._lockout
+
+    @staticmethod
+    def reset() -> None:
+        """Reset the failure counter after a successful unlock or PIN set."""
+        PinRateLimiter._failures = 0
+        PinRateLimiter._first_failure_time = 0.0
+        PinRateLimiter._lockout = False
 
 
 class LockManager:
@@ -234,12 +425,14 @@ class BackupManager:
         backups = []
         for path in sorted(BACKUPS_DIR.glob("expenses_*.db"), key=lambda p: p.name, reverse=True):
             stat = path.stat()
-            backups.append({
-                "path": str(path),
-                "name": path.name,
-                "size": stat.st_size,
-                "modified": datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat(),
-            })
+            backups.append(
+                {
+                    "path": str(path),
+                    "name": path.name,
+                    "size": stat.st_size,
+                    "modified": datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat(),
+                }
+            )
         return backups
 
     @staticmethod
@@ -311,6 +504,20 @@ class SQLCipherManager:
     """SQLCipher database encryption management."""
 
     KEY_FILE = DATA_DIR / ".dbkey"
+    KEY_LENGTH_HEX = 64  # 32 bytes = 64 hex characters
+
+    @staticmethod
+    def validate_key(key: str) -> str:
+        """Validate that a key is safe for use in a PRAGMA statement.
+
+        Returns the key if valid. Raises ValueError on suspicious input.
+        SQLCipher keys are hex strings from secrets.token_hex(32).
+        """
+        if not key or len(key) != SQLCipherManager.KEY_LENGTH_HEX:
+            raise ValueError("Invalid SQLCipher key length")
+        if not all(c in "0123456789abcdef" for c in key.lower()):
+            raise ValueError("SQLCipher key must be a hex string")
+        return key
 
     @staticmethod
     def is_encrypted_db(db_path: Path) -> bool:
@@ -370,8 +577,7 @@ class SQLCipherManager:
             from pysqlcipher3 import dbapi2 as sqlite
         except ImportError as exc:
             raise ImportError(
-                "pysqlcipher3 is required for database encryption. "
-                "Install it with: pip install pysqlcipher3"
+                "pysqlcipher3 is required for database encryption. Install it with: pip install pysqlcipher3"
             ) from exc
 
         if not db_path.exists():
@@ -382,8 +588,9 @@ class SQLCipherManager:
 
         temp_encrypted = db_path.with_suffix(".db.encrypted")
 
+        safe_key = SQLCipherManager.validate_key(key)
         source_conn = sqlite.connect(str(db_path))
-        source_conn.execute(f"PRAGMA key = '{key}'")
+        source_conn.execute(f"PRAGMA key = '{safe_key}'")
         source_conn.execute("ATTACH DATABASE ? AS encrypted KEY ?", (str(temp_encrypted), key))
         source_conn.execute("SELECT sqlcipher_export('encrypted')")
         source_conn.execute("DETACH DATABASE encrypted")
