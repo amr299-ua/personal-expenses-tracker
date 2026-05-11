@@ -6,7 +6,32 @@ and the services layer.
 
 from __future__ import annotations
 
+import sys
 from datetime import date
+from pathlib import Path
+
+_DATA_DIR: Path | None = None
+
+
+def resolve_app_data_dir() -> Path:
+    """Return the application data directory, supporting portable mode.
+
+    Portable mode is active when a `data/` directory or `.portable` marker
+    file exists next to the executable. In that case, data is stored
+    alongside the executable instead of the current working directory.
+    """
+    global _DATA_DIR
+    if _DATA_DIR is not None:
+        return _DATA_DIR
+
+    exe_dir = Path(sys.argv[0]).resolve().parent if sys.argv[0] else Path.cwd()
+    portable_data = exe_dir / "data"
+    portable_marker = exe_dir / ".portable"
+
+    _DATA_DIR = portable_data if (portable_data.is_dir() or portable_marker.exists()) else Path("data")
+
+    return _DATA_DIR
+
 
 INCOME_CATEGORY_KEYS = [
     "salary",
@@ -71,11 +96,14 @@ def filter_transaction_rows(
     date_from: date | None,
     date_to: date | None,
     type_db_to_display: dict[str, str],
+    *,
+    tags_filter: str = "",
 ) -> list[dict[str, object]]:
-    """Filter transaction rows by search, type, category and date range."""
+    """Filter transaction rows by search, type, category, date range and tags."""
     normalized_search = search.strip().lower()
     normalized_category = selected_category.strip().lower()
     normalized_all_label = all_label.strip().lower()
+    normalized_tags = {t.strip().lower() for t in tags_filter.split(",") if t.strip()}
 
     filtered: list[dict[str, object]] = []
     for row in rows:
@@ -95,6 +123,12 @@ def filter_transaction_rows(
             continue
         if date_to and row_date and row_date > date_to:
             continue
+
+        if normalized_tags:
+            row_tags_raw = str(row.get("tags") or "")
+            row_tags = {t.strip().lower() for t in row_tags_raw.split(",") if t.strip()}
+            if not normalized_tags & row_tags:
+                continue
 
         if normalized_search:
             searchable = " ".join(

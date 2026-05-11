@@ -66,8 +66,9 @@ class TransactionService:
         date_from: date | None = None,
         date_to: date | None = None,
         type_db_to_display: dict[str, str] | None = None,
+        tags_filter: str = "",
     ) -> list[dict[str, Any]]:
-        """Apply search, type, category and date filters to transaction rows."""
+        """Apply search, type, category, date and tag filters to transaction rows."""
         return _filter_transaction_rows(
             rows=rows,
             search=search,
@@ -77,6 +78,7 @@ class TransactionService:
             date_from=date_from,
             date_to=date_to,
             type_db_to_display=type_db_to_display or {},
+            tags_filter=tags_filter,
         )
 
     @staticmethod
