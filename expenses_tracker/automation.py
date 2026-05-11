@@ -10,6 +10,7 @@ from email.mime.text import MIMEText
 from typing import TYPE_CHECKING, Any, cast
 
 import schedule
+from sqlalchemy import select
 
 from expenses_tracker.exporters import export_reports
 from expenses_tracker.i18n import tr
@@ -69,6 +70,8 @@ class ReportScheduler:
             config = self.config_getter()
         with self._lock:
             self._scheduler.clear()
+            # Always check for recurring transactions daily
+            self._scheduler.every().day.at("00:01").do(self._run_recurring)
             if not config.get("enabled"):
                 return
             schedule_type = config.get("schedule_type", "monthly")
@@ -95,13 +98,9 @@ class ReportScheduler:
                         days[schedule_day].at(schedule_time).do(self._run_backup)
             elif schedule_type == "monthly" and schedule_day is not None:
                 # schedule library does not have monthly; use a daily check
-                self._scheduler.every().day.at(schedule_time).do(
-                    self._run_monthly_report, day=schedule_day
-                )
+                self._scheduler.every().day.at(schedule_time).do(self._run_monthly_report, day=schedule_day)
                 if config.get("backup_enabled"):
-                    self._scheduler.every().day.at(schedule_time).do(
-                        self._run_monthly_backup, day=schedule_day
-                    )
+                    self._scheduler.every().day.at(schedule_time).do(self._run_monthly_backup, day=schedule_day)
 
     def _run_monthly_report(self, day: int) -> None:
         today = date.today()
@@ -119,6 +118,15 @@ class ReportScheduler:
         if date.today().day == day:
             self._run_backup()
 
+    def _run_recurring(self) -> None:
+        """Process recurring transactions due today."""
+        try:
+            created = self.database.process_recurring_transactions()
+            if created > 0:
+                logger.info("Created %d recurring transactions", created)
+        except Exception:
+            logger.exception("Recurring transaction processing failed")
+
     def _run_report(self) -> None:
         config = self.config_getter()
         if not config.get("enabled"):
@@ -131,6 +139,7 @@ class ReportScheduler:
                 _compute_category_rows_from_transactions,
                 _compute_month_rows_from_transactions,
             )
+
             category_rows = _compute_category_rows_from_transactions(transactions)
             month_rows = _compute_month_rows_from_transactions(transactions)
             fmt = config.get("export_format", "excel")
@@ -156,7 +165,8 @@ class ReportScheduler:
         try:
             with self.database.Session() as session:
                 from expenses_tracker.models import AutomationConfig
-                row = session.query(AutomationConfig).first()
+
+                row = session.execute(select(AutomationConfig)).scalar_one_or_none()
                 if row is not None:
                     row.last_run = datetime.now(timezone.utc)
                     session.commit()
