@@ -6,6 +6,7 @@ from tkinter import messagebox, ttk
 
 from expenses_tracker.cloud_sync import (
     CloudProvider,
+    CloudSyncConfigManager,
     CloudSyncManager,
     DropboxProvider,
     GoogleDriveProvider,
@@ -32,22 +33,28 @@ class CloudSyncDialog(tk.Toplevel):
 
         self.db_path = Path(db_path)
         self.encryption_key = encryption_key
-        self.provider: CloudProvider | None = None
-        self.sync_manager: CloudSyncManager | None = None
 
         frame = ttk.Frame(self, padding=16)
         frame.pack(fill="both", expand=True)
 
-        ttk.Label(frame, text=self._rtl_text(tr(self._language, "cloud_sync_config"))).pack(anchor="w" if not self._rtl else "e", pady=(0, 8))
+        ttk.Label(frame, text=self._rtl_text(tr(self._language, "cloud_sync_config"))).pack(
+            anchor="w" if not self._rtl else "e", pady=(0, 8)
+        )
 
         provider_frame = ttk.Frame(frame)
         provider_frame.pack(fill="x", pady=(0, 8))
 
         ttk.Label(provider_frame, text=self._rtl_text(tr(self._language, "label_type"))).pack(side="left", padx=(0, 6))
         self.provider_var = tk.StringVar(value="webdav")
-        ttk.Radiobutton(provider_frame, text="WebDAV", variable=self.provider_var, value="webdav").pack(side="left", padx=(0, 6))
-        ttk.Radiobutton(provider_frame, text="Dropbox", variable=self.provider_var, value="dropbox").pack(side="left", padx=(0, 6))
-        ttk.Radiobutton(provider_frame, text="Google Drive", variable=self.provider_var, value="gdrive").pack(side="left", padx=(0, 6))
+        ttk.Radiobutton(
+            provider_frame, text=tr(self._language, "cloud_sync_webdav"), variable=self.provider_var, value="webdav"
+        ).pack(side="left", padx=(0, 6))
+        ttk.Radiobutton(
+            provider_frame, text=tr(self._language, "cloud_sync_dropbox"), variable=self.provider_var, value="dropbox"
+        ).pack(side="left", padx=(0, 6))
+        ttk.Radiobutton(
+            provider_frame, text=tr(self._language, "cloud_sync_gdrive"), variable=self.provider_var, value="gdrive"
+        ).pack(side="left", padx=(0, 6))
 
         self._fields_frame = ttk.Frame(frame)
         self._fields_frame.pack(fill="x", pady=(0, 8))
@@ -62,7 +69,12 @@ class CloudSyncDialog(tk.Toplevel):
 
         self.provider_var.trace_add("write", lambda *_: self._build_fields())
 
-        ttk.Checkbutton(frame, text=self._rtl_text(tr(self._language, "cloud_sync_auto")), variable=tk.BooleanVar(value=False)).pack(anchor="w" if not self._rtl else "e", pady=(0, 8))
+        self._auto_sync_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(
+            frame,
+            text=self._rtl_text(tr(self._language, "cloud_sync_auto")),
+            variable=self._auto_sync_var,
+        ).pack(anchor="w" if not self._rtl else "e", pady=(0, 8))
 
         status_frame = ttk.Frame(frame)
         status_frame.pack(fill="x", pady=(0, 8))
@@ -73,9 +85,21 @@ class CloudSyncDialog(tk.Toplevel):
         buttons = ttk.Frame(frame)
         buttons.pack(fill="x")
 
-        ttk.Button(buttons, text=self._rtl_text(tr(self._language, "cloud_sync_testing")), command=self._test_connection).pack(side="left", padx=(0, 6))
-        ttk.Button(buttons, text=self._rtl_text(tr(self._language, "cloud_sync_now")), command=self._sync_now).pack(side="left", padx=(0, 6))
-        ttk.Button(buttons, text=self._rtl_text(tr(self._language, "btn_close")), command=self.destroy).pack(side="right")
+        ttk.Button(
+            buttons, text=self._rtl_text(tr(self._language, "cloud_sync_testing")), command=self._test_connection
+        ).pack(side="left", padx=(0, 6))
+        ttk.Button(buttons, text=self._rtl_text(tr(self._language, "cloud_sync_now")), command=self._sync_now).pack(
+            side="left", padx=(0, 6)
+        )
+        ttk.Button(buttons, text=self._rtl_text(tr(self._language, "btn_save")), command=self._save_config).pack(
+            side="left", padx=(0, 6)
+        )
+        ttk.Button(buttons, text=self._rtl_text(tr(self._language, "btn_close")), command=self.destroy).pack(
+            side="right"
+        )
+
+        self._load_saved_config()
+        self.protocol("WM_DELETE_WINDOW", self._on_close)
 
     def _rtl_text(self, text: str) -> str:
         if self._rtl:
@@ -115,8 +139,61 @@ class CloudSyncDialog(tk.Toplevel):
             elif kind == "gdrive":
                 return GoogleDriveProvider(self.credentials_path_var.get())
         except Exception as error:
-            messagebox.showerror(tr(self._language, "error_generic"), f"{tr(self._language, 'cloud_sync_error', error=error)}", parent=self)
+            messagebox.showerror(
+                tr(self._language, "error_generic"),
+                f"{tr(self._language, 'cloud_sync_error', error=error)}",
+                parent=self,
+            )
         return None
+
+    def _collect_config(self) -> dict:
+        kind = self.provider_var.get()
+        config: dict = {
+            "provider": kind,
+            "auto_sync": self._auto_sync_var.get(),
+        }
+        if kind == "webdav":
+            config["url"] = self.url_var.get()
+            config["username"] = self.username_var.get()
+            config["password"] = self.password_var.get()
+        elif kind == "dropbox":
+            config["token"] = self.token_var.get()
+        elif kind == "gdrive":
+            config["credentials_path"] = self.credentials_path_var.get()
+        return config
+
+    def _load_saved_config(self) -> None:
+        saved = CloudSyncConfigManager.load()
+        if saved is None:
+            return
+        kind = saved.get("provider", "webdav")
+        self.provider_var.set(kind)
+        if kind == "webdav":
+            self.url_var.set(saved.get("url", ""))
+            self.username_var.set(saved.get("username", ""))
+            self.password_var.set(saved.get("password", ""))
+        elif kind == "dropbox":
+            self.token_var.set(saved.get("token", ""))
+        elif kind == "gdrive":
+            self.credentials_path_var.set(saved.get("credentials_path", ""))
+        self._auto_sync_var.set(bool(saved.get("auto_sync", False)))
+        self._build_fields()
+
+    def _save_config(self) -> None:
+        config = self._collect_config()
+        try:
+            CloudSyncConfigManager.save(config)
+            messagebox.showinfo(
+                tr(self._language, "success"),
+                tr(self._language, "cloud_sync_config_saved"),
+                parent=self,
+            )
+        except Exception as error:
+            messagebox.showerror(
+                tr(self._language, "error_generic"),
+                tr(self._language, "cloud_sync_error", error=error),
+                parent=self,
+            )
 
     def _test_connection(self) -> None:
         provider = self._get_provider()
@@ -125,8 +202,11 @@ class CloudSyncDialog(tk.Toplevel):
         try:
             files = provider.list_files("/")
             messagebox.showinfo(tr(self._language, "success"), f"Connection OK. {len(files)} files found.", parent=self)
+            self._save_config()
         except Exception as error:
-            messagebox.showerror(tr(self._language, "error_generic"), tr(self._language, "cloud_sync_error", error=error), parent=self)
+            messagebox.showerror(
+                tr(self._language, "error_generic"), tr(self._language, "cloud_sync_error", error=error), parent=self
+            )
 
     def _sync_now(self) -> None:
         if self.encryption_key is None:
@@ -138,7 +218,16 @@ class CloudSyncDialog(tk.Toplevel):
         manager = CloudSyncManager(provider, self.encryption_key)
         try:
             manager.sync_up(self.db_path)
-            self.last_sync_var.set("Just now")
+            from datetime import datetime
+
+            self.last_sync_var.set(datetime.now().strftime("%Y-%m-%d %H:%M"))
             messagebox.showinfo(tr(self._language, "success"), tr(self._language, "cloud_sync_success"), parent=self)
+            self._save_config()
         except Exception as error:
-            messagebox.showerror(tr(self._language, "error_generic"), tr(self._language, "cloud_sync_error", error=error), parent=self)
+            messagebox.showerror(
+                tr(self._language, "error_generic"), tr(self._language, "cloud_sync_error", error=error), parent=self
+            )
+
+    def _on_close(self) -> None:
+        self._save_config()
+        self.destroy()
