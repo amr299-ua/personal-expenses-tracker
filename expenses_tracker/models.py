@@ -53,12 +53,8 @@ class Transaction(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     amount: Mapped[float] = mapped_column(Numeric(15, 2), nullable=False)
-    transaction_type: Mapped[str] = mapped_column(
-        String(10), nullable=False
-    )  # 'income' or 'expense'
-    category_id: Mapped[int | None] = mapped_column(
-        ForeignKey("categories.id"), nullable=True
-    )
+    transaction_type: Mapped[str] = mapped_column(String(10), nullable=False)  # 'income' or 'expense'
+    category_id: Mapped[int | None] = mapped_column(ForeignKey("categories.id"), nullable=True)
     # Keep denormalized category name for backwards compatibility and quick reads
     category: Mapped[str] = mapped_column(String(120), nullable=False, default="")
     transaction_date: Mapped[date] = mapped_column(Date, nullable=False)
@@ -66,13 +62,12 @@ class Transaction(Base):
     currency: Mapped[str] = mapped_column(String(3), nullable=False, default="USD")
     tags: Mapped[str | None] = mapped_column(String(500), nullable=True)
     recurring: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False, default=lambda: datetime.now(timezone.utc)
-    )
+    recurring_interval: Mapped[str | None] = mapped_column(String(10), nullable=True)  # daily, weekly, monthly, yearly
+    next_recurring_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
 
-    category_obj: Mapped[Category | None] = relationship(
-        "Category", back_populates="transactions"
-    )
+    category_obj: Mapped[Category | None] = relationship("Category", back_populates="transactions")
 
     __table_args__ = (
         Index("idx_transactions_date_type", "transaction_date", "transaction_type"),
@@ -96,13 +91,9 @@ class Budget(Base):
     category: Mapped[str] = mapped_column(String(120), nullable=False)
     month: Mapped[str] = mapped_column(String(7), nullable=False)  # YYYY-MM
     planned_amount: Mapped[float] = mapped_column(Numeric(15, 2), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False, default=lambda: datetime.now(timezone.utc)
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
 
-    __table_args__ = (
-        Index("idx_budgets_category_month", "category", "month", unique=True),
-    )
+    __table_args__ = (Index("idx_budgets_category_month", "category", "month", unique=True),)
 
     def __repr__(self) -> str:
         """Return developer-friendly representation."""
@@ -119,9 +110,7 @@ class AuditLogEntry(Base):
     entity: Mapped[str] = mapped_column(String(120), nullable=False, default="")
     entity_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     details: Mapped[str] = mapped_column(Text, nullable=False, default="")
-    timestamp: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False, default=lambda: datetime.now(timezone.utc)
-    )
+    timestamp: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
 
     __table_args__ = (
         Index("idx_audit_log_action", "action"),
@@ -144,13 +133,9 @@ class ExchangeRate(Base):
     to_currency: Mapped[str] = mapped_column(String(3), nullable=False)
     rate: Mapped[float] = mapped_column(Numeric(15, 6), nullable=False)
     rate_date: Mapped[date] = mapped_column(Date, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False, default=lambda: datetime.now(timezone.utc)
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
 
-    __table_args__ = (
-        Index("idx_exchange_rate_lookup", "from_currency", "to_currency", "rate_date"),
-    )
+    __table_args__ = (Index("idx_exchange_rate_lookup", "from_currency", "to_currency", "rate_date"),)
 
     def __repr__(self) -> str:
         """Return developer-friendly representation."""
@@ -180,9 +165,7 @@ class AutomationConfig(Base):
     email_to: Mapped[str | None] = mapped_column(String(255), nullable=True)
     email_subject: Mapped[str | None] = mapped_column(String(255), nullable=True)
     last_run: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False, default=lambda: datetime.now(timezone.utc)
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
 
     def __repr__(self) -> str:
         """Return developer-friendly representation."""
@@ -192,17 +175,18 @@ class AutomationConfig(Base):
 def init_engine(db_path: str, cipher_key: str | None = None) -> Any:
     """Create a SQLAlchemy engine, optionally with SQLCipher encryption."""
     if cipher_key:
+        from expenses_tracker.security import SQLCipherManager
+
+        safe_key = SQLCipherManager.validate_key(cipher_key)
         try:
             from pysqlcipher3 import dbapi2 as sqlite
         except ImportError as exc:
             raise ImportError(
-                "pysqlcipher3 is required for encrypted databases. "
-                "Install it with: pip install pysqlcipher3"
+                "pysqlcipher3 is required for encrypted databases. Install it with: pip install pysqlcipher3"
             ) from exc
 
         def _connect() -> Any:
             conn = sqlite.connect(db_path)
-            safe_key = cipher_key.replace("'", "''")
             conn.execute(f"PRAGMA key = '{safe_key}'")
             return conn
 

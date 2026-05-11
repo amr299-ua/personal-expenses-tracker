@@ -12,6 +12,16 @@ MAX_DESCRIPTION_LENGTH = 1000
 DEFAULT_CURRENCY = "USD"
 
 
+def _format_pydantic_error(exc: ValidationError) -> str:
+    """Convert a Pydantic ValidationError into a human-readable string."""
+    messages = []
+    for error in exc.errors():
+        loc = " -> ".join(str(p) for p in error["loc"])
+        msg = error["msg"]
+        messages.append(f"{loc}: {msg}" if loc else msg)
+    return "; ".join(messages)
+
+
 class TransactionInput(BaseModel):
     """Validated input for creating or updating a transaction."""
 
@@ -25,6 +35,8 @@ class TransactionInput(BaseModel):
     currency: str = Field(default=DEFAULT_CURRENCY, max_length=3)
     tags: str | None = Field(default=None, max_length=500)
     recurring: bool = Field(default=False)
+    recurring_interval: str | None = Field(default=None, max_length=10)
+    next_recurring_date: date | None = Field(default=None)
 
     def __init__(
         self,
@@ -36,6 +48,8 @@ class TransactionInput(BaseModel):
         currency: str = DEFAULT_CURRENCY,
         tags: str | None = None,
         recurring: bool = False,
+        recurring_interval: str | None = None,
+        next_recurring_date: date | None = None,
     ) -> None:
         try:
             super().__init__(
@@ -47,9 +61,11 @@ class TransactionInput(BaseModel):
                 currency=currency,
                 tags=tags,
                 recurring=recurring,
+                recurring_interval=recurring_interval,
+                next_recurring_date=next_recurring_date,
             )
         except ValidationError as exc:
-            raise ValueError(str(exc)) from exc
+            raise ValueError(_format_pydantic_error(exc)) from exc
 
     @field_validator("transaction_type")
     @classmethod
@@ -77,6 +93,16 @@ class TransactionInput(BaseModel):
             return None
         return stripped
 
+    @field_validator("recurring_interval")
+    @classmethod
+    def _check_interval(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        valid = {"daily", "weekly", "monthly", "yearly"}
+        if value.strip().lower() not in valid:
+            raise ValueError(f"Invalid recurring interval: {value}. Must be daily, weekly, monthly, or yearly.")
+        return value.strip().lower()
+
     def to_orm_dict(self) -> dict[str, Any]:
         """Return a dictionary suitable for creating an ORM Transaction object."""
         return {
@@ -88,6 +114,8 @@ class TransactionInput(BaseModel):
             "currency": self.currency,
             "tags": self.tags,
             "recurring": self.recurring,
+            "recurring_interval": self.recurring_interval,
+            "next_recurring_date": self.next_recurring_date,
         }
 
 
@@ -145,7 +173,7 @@ class CategoryInput(BaseModel):
                 color=color,
             )
         except ValidationError as exc:
-            raise ValueError(str(exc)) from exc
+            raise ValueError(_format_pydantic_error(exc)) from exc
 
 
 class BudgetInput(BaseModel):
@@ -170,7 +198,7 @@ class BudgetInput(BaseModel):
                 planned_amount=planned_amount,
             )
         except ValidationError as exc:
-            raise ValueError(str(exc)) from exc
+            raise ValueError(_format_pydantic_error(exc)) from exc
 
     @field_validator("category")
     @classmethod
@@ -236,4 +264,4 @@ class ExchangeRateInput(BaseModel):
                 rate_date=rate_date,
             )
         except ValidationError as exc:
-            raise ValueError(str(exc)) from exc
+            raise ValueError(_format_pydantic_error(exc)) from exc
