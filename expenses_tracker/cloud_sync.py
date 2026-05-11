@@ -112,7 +112,10 @@ class GoogleDriveProvider(CloudProvider):
         from google.oauth2.credentials import Credentials
         from googleapiclient.discovery import build
 
-        creds = Credentials.from_authorized_user_file(credentials_path, ["https://www.googleapis.com/auth/drive"])
+        creds = cast(
+            "Any",
+            Credentials,
+        ).from_authorized_user_file(credentials_path, ["https://www.googleapis.com/auth/drive"])
         self.service = build("drive", "v3", credentials=creds)
 
     def upload(self, local_path: Path, remote_path: str) -> None:
@@ -173,7 +176,7 @@ class CloudSyncConfigManager:
             raw = AppCrypto.decrypt(encrypted)
             if raw is None:
                 return None
-            return json.loads(raw)
+            return cast("dict[str, Any]", json.loads(raw))
         except (json.JSONDecodeError, OSError):
             return None
 

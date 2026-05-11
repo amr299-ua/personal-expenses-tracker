@@ -752,6 +752,8 @@ class ExpenseDatabase:
 
             created = 0
             for tx in due:
+                if tx.next_recurring_date is None:
+                    continue
                 tx_input = TransactionInput(
                     amount=tx.amount,
                     transaction_type=tx.transaction_type,

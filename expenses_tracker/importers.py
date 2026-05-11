@@ -37,7 +37,7 @@ def _safe_date(value: Any) -> date | None:
     return None
 
 
-def _col_val(key: str, headers: dict[str, int], row_values: tuple) -> str:
+def _col_val(key: str, headers: dict[str, int], row_values: tuple[Any, ...]) -> str:
     """Extract a cell value by column key from a parsed Excel row."""
     idx = headers.get(key)
     if idx is None or idx >= len(row_values):
@@ -107,7 +107,7 @@ def parse_excel(filepath: Path) -> list[dict[str, Any]]:
         if not headers:
             continue
 
-        row_values: tuple = row
+        row_values: tuple[Any, ...] = row
         amount = _safe_float(_col_val("amount", headers, row_values))
         if amount is None or amount <= 0:
             continue
