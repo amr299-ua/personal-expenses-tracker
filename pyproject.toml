@@ -44,6 +44,9 @@ dev = [
 [project.scripts]
 expenses-tracker = "expenses_tracker.__main__:main"
 
+[tool.hatch.build.targets.wheel]
+packages = ["expenses_tracker"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-ra -q --strict-markers"

@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import tkinter as tk
 from datetime import date, timedelta
+from functools import partial
 from tkinter import ttk
 from typing import Any
 
@@ -406,7 +407,7 @@ class TransactionsTab:
             self.transactions_tree.heading(
                 column_name,
                 text=self.app._rtl_text(label),
-                command=lambda selected=column_name: self._on_sort_change(selected),
+                command=partial(self._on_sort_change, column_name),
             )
 
     def update_texts(self) -> None:

@@ -590,8 +590,7 @@ class SQLCipherManager:
 
         safe_key = SQLCipherManager.validate_key(key)
         source_conn = sqlite.connect(str(db_path))
-        source_conn.execute(f"PRAGMA key = '{safe_key}'")
-        source_conn.execute("ATTACH DATABASE ? AS encrypted KEY ?", (str(temp_encrypted), key))
+        source_conn.execute("ATTACH DATABASE ? AS encrypted KEY ?", (str(temp_encrypted), safe_key))
         source_conn.execute("SELECT sqlcipher_export('encrypted')")
         source_conn.execute("DETACH DATABASE encrypted")
         source_conn.close()
