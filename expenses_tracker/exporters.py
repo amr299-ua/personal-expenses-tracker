@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import io
 import json
 from collections import defaultdict
 from datetime import datetime
@@ -21,6 +22,7 @@ from openpyxl import Workbook
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+from reportlab.platypus import Image as RLImage
 from reportlab.platypus import PageBreak, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
 from expenses_tracker.i18n import tr
@@ -43,6 +45,7 @@ def export_reports(
     fmt: str = "all",
     language: str = "en",
     year_month: str | None = None,
+    budget_rows: list[dict[str, Any]] | None = None,
 ) -> list[Path]:
     """Generate reports in the specified format and return output file paths."""
     output_path = Path(output_dir)
@@ -65,7 +68,7 @@ def export_reports(
 
     if fmt in {"pdf", "all"}:
         pdf_file = output_path / f"report_{timestamp}.pdf"
-        _export_pdf(pdf_file, transactions, category_rows, month_rows, language)
+        _export_pdf(pdf_file, transactions, category_rows, month_rows, language, budget_rows)
         apply_private_permissions(pdf_file)
         generated_files.append(pdf_file)
 
@@ -89,11 +92,68 @@ def export_reports(
 
     if fmt == "monthly_pdf":
         monthly_pdf_file = output_path / f"monthly_report_{year_month or timestamp}.pdf"
-        _export_monthly_pdf(monthly_pdf_file, transactions, language, year_month)
+        _export_monthly_pdf(monthly_pdf_file, transactions, language, year_month, budget_rows)
         apply_private_permissions(monthly_pdf_file)
         generated_files.append(monthly_pdf_file)
 
     return generated_files
+
+
+def _figure_to_image(figure: Any, width: int = 500, dpi: int = 150) -> RLImage:
+    """Convert a matplotlib Figure to a ReportLab Image without disk I/O."""
+    buf = io.BytesIO()
+    figure.savefig(buf, format="png", dpi=dpi, bbox_inches="tight")
+    buf.seek(0)
+    img = RLImage(buf, width=width, height=width * 0.5)
+    return img
+
+
+def _compute_savings_rate(income: float, expense: float) -> float:
+    """Calculate savings rate as percentage."""
+    if income <= 0:
+        return 0.0
+    return ((income - expense) / income) * 100
+
+
+def _compute_trend_direction(values: list[float]) -> str:
+    """Calculate trend direction: growth, decline, or stable."""
+    if len(values) < 2:
+        return "stable"
+    first_half = sum(values[: len(values) // 2])
+    second_half = sum(values[len(values) // 2 :])
+    diff_pct = ((second_half - first_half) / first_half * 100) if first_half > 0 else 0
+    if diff_pct > 5:
+        return "growth"
+    if diff_pct < -5:
+        return "decline"
+    return "stable"
+
+
+def _detect_anomalies(month_rows: list[dict[str, Any]]) -> list[str]:
+    """Detect anomalies: deficit months, spending spikes."""
+    anomalies: list[str] = []
+    prev_expense: float | None = None
+    deficit_count = 0
+
+    for row in month_rows:
+        income = float(row.get("income", 0))
+        expense = float(row.get("expense", 0))
+        if expense > income:
+            deficit_count += 1
+        if prev_expense is not None and prev_expense > 0:
+            pct_change = ((expense - prev_expense) / prev_expense) * 100
+            if pct_change > 30:
+                anomalies.append(f"spike|{row.get('month', '')}|{pct_change:.0f}")
+        prev_expense = expense
+
+    if deficit_count > 0:
+        anomalies.insert(0, f"deficit|{deficit_count}")
+
+    surplus_count = len(month_rows) - deficit_count
+    if surplus_count > 0:
+        anomalies.append(f"surplus|{surplus_count}|{len(month_rows)}")
+
+    return anomalies
 
 
 def _localize_transaction_type(value: str, language: str) -> str:
@@ -217,7 +277,10 @@ def _export_pdf(
     category_rows: list[dict[str, Any]],
     month_rows: list[dict[str, Any]],
     language: str,
+    budget_rows: list[dict[str, Any]] | None = None,
 ) -> None:
+    from expenses_tracker.charts import generate_all_figures
+
     base_styles = getSampleStyleSheet()
     styles = _build_pdf_styles(base_styles)
     document = SimpleDocTemplate(
@@ -231,17 +294,43 @@ def _export_pdf(
     elements: list[Any] = []
 
     summary_metrics = _compute_summary_metrics(transactions, category_rows, month_rows)
-    summary_data = _build_executive_summary(summary_metrics, language)
 
-    elements.append(_build_cover_banner(summary_metrics, styles, language))
-    elements.append(Spacer(1, 12))
-    elements.append(_build_kpi_table(summary_metrics, styles, language))
-    elements.append(Spacer(1, 10))
-
-    elements.append(Paragraph(tr(language, "pdf_exec_summary"), styles["section_title"]))
-    elements.append(Paragraph(summary_data, styles["body_text"]))
+    # 1. Premium cover with KPI dashboard
+    elements.extend(_build_premium_cover(summary_metrics, styles, language))
     elements.append(PageBreak())
 
+    # 2. Trend analysis with anomalies and projection
+    elements.extend(_build_trend_analysis_section(summary_metrics, month_rows, styles, language))
+    elements.append(PageBreak())
+
+    # 3. Generate all charts as figures
+    figures = generate_all_figures(category_rows, month_rows, language, "default")
+
+    # 4. Embed charts
+    chart_title_map = {
+        "line": "pdf_chart_evolution",
+        "bar": "pdf_chart_categories",
+        "pie": "pdf_chart_distribution",
+        "scatter": "pdf_chart_scatter",
+        "bar3d": "pdf_chart_3d",
+        "forecast": "pdf_chart_forecast",
+        "sankey": "pdf_chart_sankey",
+    }
+
+    for chart_key in ["line", "bar", "pie", "scatter", "bar3d", "forecast", "sankey"]:
+        if chart_key in figures:
+            elements.extend(_build_chart_section(
+                figures[chart_key],
+                chart_title_map[chart_key],
+                styles,
+                language,
+            ))
+
+    # 5. Budget section (if data provided)
+    if budget_rows:
+        elements.extend(_build_budget_section(budget_rows, styles, language))
+
+    # 6. Category table
     category_table_rows = [
         [
             _escape_reportlab(str(row["category"])),
@@ -268,6 +357,7 @@ def _export_pdf(
         language=language,
     )
 
+    # 7. Month table
     month_table_rows = [
         [
             _escape_reportlab(str(row["month"])),
@@ -294,6 +384,7 @@ def _export_pdf(
         language=language,
     )
 
+    # 8. Transactions table
     movement_table_rows = [
         [
             _escape_reportlab(str(row["transaction_date"])),
@@ -457,6 +548,157 @@ def _build_executive_summary(metrics: dict[str, Any], language: str) -> str:
     return "<br/>".join(lines)
 
 
+def _build_trend_analysis_section(
+    metrics: dict[str, Any],
+    month_rows: list[dict[str, Any]],
+    styles: dict[str, ParagraphStyle],
+    language: str,
+) -> list[Any]:
+    """Build a trend analysis section with narrative text and anomaly alerts."""
+    elements: list[Any] = []
+    elements.append(Paragraph(tr(language, "pdf_exec_summary"), styles["section_title"]))
+
+    elements.append(Paragraph(_build_executive_summary(metrics, language), styles["body_text"]))
+    elements.append(Spacer(1, 8))
+
+    if month_rows:
+        balances = [float(row.get("balance", 0)) for row in month_rows]
+        trend = _compute_trend_direction(balances)
+        trend_key = f"pdf_trend_{trend}"
+        trend_style = f"trend_{trend}"
+        elements.append(Paragraph(tr(language, trend_key), styles[trend_style]))
+        elements.append(Spacer(1, 6))
+
+        anomalies = _detect_anomalies(month_rows)
+        for anomaly in anomalies:
+            parts = anomaly.split("|")
+            if parts[0] == "deficit":
+                elements.append(
+                    Paragraph(
+                        tr(language, "pdf_alert_deficit", count=int(parts[1])),
+                        styles["insight_text"],
+                    )
+                )
+            elif parts[0] == "spike":
+                elements.append(
+                    Paragraph(
+                        tr(language, "pdf_alert_spike", category=parts[1], percent=float(parts[2])),
+                        styles["insight_text"],
+                    )
+                )
+            elif parts[0] == "surplus":
+                elements.append(
+                    Paragraph(
+                        tr(language, "pdf_alert_surplus", count=int(parts[1]), total=int(parts[2])),
+                        styles["insight_text"],
+                    )
+                )
+
+        if len(balances) >= 2:
+            import numpy as np
+
+            x = np.arange(len(balances))
+            coeffs = np.polyfit(x, balances, 1)
+            poly = np.poly1d(coeffs)
+            projection = float(poly(len(balances)))
+            elements.append(Spacer(1, 4))
+            elements.append(
+                Paragraph(
+                    tr(language, "pdf_projection_next", amount=projection),
+                    styles["analysis_heading"],
+                )
+            )
+
+    elements.append(Spacer(1, 10))
+    return elements
+
+
+def _build_chart_section(
+    figure: Any,
+    title_key: str,
+    styles: dict[str, ParagraphStyle],
+    language: str,
+    width: int = 480,
+) -> list[Any]:
+    """Build a chart section with title and embedded matplotlib figure."""
+    elements: list[Any] = []
+    elements.append(PageBreak())
+    elements.append(Paragraph(tr(language, title_key), styles["chart_title"]))
+    elements.append(Spacer(1, 6))
+    elements.append(_figure_to_image(figure, width=width))
+    elements.append(Spacer(1, 10))
+    return elements
+
+
+def _build_budget_section(
+    budget_rows: list[dict[str, Any]],
+    styles: dict[str, ParagraphStyle],
+    language: str,
+) -> list[Any]:
+    """Build a budget analysis section with chart and table."""
+    elements: list[Any] = []
+    elements.append(PageBreak())
+    elements.append(Paragraph(tr(language, "pdf_budget_section_title"), styles["section_title"]))
+    elements.append(Spacer(1, 6))
+
+    from expenses_tracker.charts import budget_comparison_figure, get_palette
+
+    colors_palette = get_palette("default")
+    figure = budget_comparison_figure(budget_rows, language, colors_palette)
+    elements.append(_figure_to_image(figure, width=480))
+    elements.append(Spacer(1, 10))
+
+    header = [
+        tr(language, "excel_col_category"),
+        tr(language, "pdf_budget_planned"),
+        tr(language, "pdf_budget_actual"),
+        tr(language, "pdf_budget_delta"),
+        tr(language, "pdf_budget_compliance"),
+    ]
+
+    rows = []
+    for row in budget_rows:
+        planned = float(row.get("planned", 0))
+        actual = float(row.get("actual", 0))
+        delta = planned - actual
+        compliance = ((planned - actual) / planned * 100) if planned > 0 else 0
+        status = tr(language, "pdf_budget_ok") if delta >= 0 else tr(language, "pdf_budget_exceeded")
+        rows.append([
+            _escape_reportlab(str(row.get("category", ""))),
+            f"{planned:.2f}",
+            f"{actual:.2f}",
+            f"{delta:.2f}",
+            f"{compliance:.0f}% - {status}",
+        ])
+
+    table_data = [header, *rows]
+    table = Table(table_data, colWidths=[120, 80, 80, 80, 120], repeatRows=1)
+    table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1f3a5f")),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+        ("ALIGN", (0, 0), (-1, 0), "CENTER"),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("FONTSIZE", (0, 0), (-1, 0), 10),
+        ("BOTTOMPADDING", (0, 0), (-1, 0), 8),
+        ("TOPPADDING", (0, 0), (-1, 0), 8),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.HexColor("#f5f8fc"), colors.white]),
+        ("ALIGN", (0, 1), (-1, -1), "RIGHT"),
+        ("ALIGN", (0, 1), (0, -1), "LEFT"),
+        ("FONTNAME", (0, 1), (-1, -1), "Helvetica"),
+        ("FONTSIZE", (0, 1), (-1, -1), 9),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("GRID", (0, 0), (-1, -1), 0.3, colors.HexColor("#b8c4d6")),
+        ("LEFTPADDING", (0, 0), (-1, -1), 6),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+        ("TOPPADDING", (0, 1), (-1, -1), 5),
+        ("BOTTOMPADDING", (0, 1), (-1, -1), 5),
+    ]))
+
+    elements.append(table)
+    elements.append(Spacer(1, 10))
+    return elements
+
+
 def _build_pdf_styles(base_styles: Any) -> dict[str, ParagraphStyle]:
     return {
         "cover_title": ParagraphStyle(
@@ -500,6 +742,85 @@ def _build_pdf_styles(base_styles: Any) -> dict[str, ParagraphStyle]:
             leading=13,
             textColor=colors.HexColor("#0f233d"),
         ),
+        "kpi_value": ParagraphStyle(
+            "kpi_value",
+            parent=base_styles["Title"],
+            fontName="Helvetica-Bold",
+            fontSize=20,
+            leading=24,
+            textColor=colors.HexColor("#1f3a5f"),
+            alignment=1,
+        ),
+        "kpi_label": ParagraphStyle(
+            "kpi_label",
+            parent=base_styles["Normal"],
+            fontName="Helvetica",
+            fontSize=9,
+            leading=12,
+            textColor=colors.HexColor("#556273"),
+            alignment=1,
+        ),
+        "insight_text": ParagraphStyle(
+            "insight_text",
+            parent=base_styles["BodyText"],
+            fontName="Helvetica",
+            fontSize=10,
+            leading=14,
+            textColor=colors.HexColor("#243447"),
+            leftIndent=10,
+            borderPadding=4,
+        ),
+        "chart_title": ParagraphStyle(
+            "chart_title",
+            parent=base_styles["Heading2"],
+            fontName="Helvetica-Bold",
+            fontSize=13,
+            leading=16,
+            textColor=colors.HexColor("#1f3a5f"),
+            spaceAfter=4,
+        ),
+        "trend_growth": ParagraphStyle(
+            "trend_growth",
+            parent=base_styles["BodyText"],
+            fontName="Helvetica-Bold",
+            fontSize=10,
+            leading=14,
+            textColor=colors.HexColor("#2e7d32"),
+        ),
+        "trend_decline": ParagraphStyle(
+            "trend_decline",
+            parent=base_styles["BodyText"],
+            fontName="Helvetica-Bold",
+            fontSize=10,
+            leading=14,
+            textColor=colors.HexColor("#c62828"),
+        ),
+        "trend_stable": ParagraphStyle(
+            "trend_stable",
+            parent=base_styles["BodyText"],
+            fontName="Helvetica-Bold",
+            fontSize=10,
+            leading=14,
+            textColor=colors.HexColor("#1565c0"),
+        ),
+        "header_text": ParagraphStyle(
+            "header_text",
+            parent=base_styles["Normal"],
+            fontName="Helvetica",
+            fontSize=8,
+            leading=10,
+            textColor=colors.HexColor("#8899aa"),
+        ),
+        "analysis_heading": ParagraphStyle(
+            "analysis_heading",
+            parent=base_styles["Heading3"],
+            fontName="Helvetica-Bold",
+            fontSize=12,
+            leading=15,
+            textColor=colors.HexColor("#1f3a5f"),
+            spaceBefore=8,
+            spaceAfter=4,
+        ),
     }
 
 
@@ -518,8 +839,15 @@ def _build_cover_banner(
             end=_escape_reportlab(str(metrics["period_end"])),
         )
     )
+
+    metadata_line = (
+        f"{tr(language, 'pdf_transactions_count', count=metrics['transactions_count'])}  |  "
+        f"{tr(language, 'pdf_categories_count', count=metrics['categories_count'])}  |  "
+        f"{tr(language, 'pdf_months_count', count=metrics['months_count'])}"
+    )
+
     content = Paragraph(
-        "<b>" + tr(language, "pdf_title") + "</b><br/>" + subtitle,
+        "<b>" + tr(language, "pdf_title") + "</b><br/>" + subtitle + "<br/><br/>" + metadata_line,
         styles["cover_subtitle"],
     )
 
@@ -530,14 +858,29 @@ def _build_cover_banner(
             [
                 ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#1f3a5f")),
                 ("TEXTCOLOR", (0, 0), (-1, -1), colors.white),
-                ("LEFTPADDING", (0, 0), (-1, -1), 14),
-                ("RIGHTPADDING", (0, 0), (-1, -1), 14),
-                ("TOPPADDING", (0, 0), (-1, -1), 10),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 10),
+                ("LEFTPADDING", (0, 0), (-1, -1), 20),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 20),
+                ("TOPPADDING", (0, 0), (-1, 0), 18),
+                ("BOTTOMPADDING", (0, 0), (-1, 0), 6),
+                ("TOPPADDING", (0, 1), (-1, -1), 6),
+                ("BOTTOMPADDING", (0, 1), (-1, -1), 18),
             ]
         )
     )
     return table
+
+
+def _build_premium_cover(
+    metrics: dict[str, Any],
+    styles: dict[str, ParagraphStyle],
+    language: str,
+) -> list[Any]:
+    """Build a premium cover page with gradient-style banner and metadata badges."""
+    elements: list[Any] = []
+    elements.append(_build_cover_banner(metrics, styles, language))
+    elements.append(Spacer(1, 16))
+    elements.append(_build_kpi_dashboard(metrics, styles, language))
+    return elements
 
 
 def _build_kpi_table(metrics: dict[str, Any], styles: dict[str, ParagraphStyle], language: str) -> Table:
@@ -596,6 +939,58 @@ def _build_kpi_table(metrics: dict[str, Any], styles: dict[str, ParagraphStyle],
     return table
 
 
+def _build_kpi_dashboard(metrics: dict[str, Any], styles: dict[str, ParagraphStyle], language: str) -> Table:
+    """Build an enhanced KPI dashboard with 6 cards in a 3x2 grid."""
+    income = float(metrics["total_income"])
+    expense = float(metrics["total_expense"])
+    balance = float(metrics["balance"])
+    savings_rate = _compute_savings_rate(income, expense)
+    months_count = max(metrics["months_count"], 1)
+    avg_expense = expense / months_count
+    avg_income = income / months_count
+
+    kpi_data = [
+        (tr(language, "pdf_col_balance"), f"{balance:.2f}", "#d6f5e8" if balance >= 0 else "#ffe3de"),
+        (tr(language, "pdf_col_income"), f"{income:.2f}", "#dceeff"),
+        (tr(language, "pdf_col_expense"), f"{expense:.2f}", "#ffe3de"),
+        (tr(language, "pdf_savings_rate", rate=savings_rate), f"{savings_rate:.1f}%", "#eef1ff"),
+        (tr(language, "pdf_avg_expense_month", amount=avg_expense), f"{avg_expense:.2f}", "#fff3e0"),
+        (tr(language, "pdf_avg_income_month", amount=avg_income), f"{avg_income:.2f}", "#e8f5e9"),
+    ]
+
+    rows = []
+    for i in range(0, 6, 2):
+        row = []
+        for j in range(2):
+            label_text, value_text, bg_color = kpi_data[i + j]
+            cell_content = Paragraph(
+                f"<b>{value_text}</b><br/><font size=8>{label_text}</font>",
+                styles["kpi_cell"],
+            )
+            row.append(cell_content)
+        rows.append(row)
+
+    table = Table(rows, colWidths=[260, 260])
+    style_cmds: list[tuple[Any, ...]] = [
+        ("BOX", (0, 0), (-1, -1), 0.5, colors.HexColor("#9fb1c9")),
+        ("INNERGRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#9fb1c9")),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 12),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 12),
+        ("TOPPADDING", (0, 0), (-1, -1), 10),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 10),
+    ]
+
+    idx = 0
+    for r in range(3):
+        for c in range(2):
+            style_cmds.append(("BACKGROUND", (c, r), (c, r), colors.HexColor(kpi_data[idx][2])))
+            idx += 1
+
+    table.setStyle(TableStyle(style_cmds))
+    return table
+
+
 def _top_category(category_rows: list[dict[str, Any]], key: str) -> str:
     if not category_rows:
         return "N/A"
@@ -613,13 +1008,28 @@ def _chunks(items: list[list[str]], chunk_size: int) -> list[list[list[str]]]:
 
 def _draw_page_number(canvas: Any, doc: Any, language: str) -> None:
     canvas.saveState()
+    page_width = A4[0]
+
+    # Header
+    canvas.setStrokeColor(colors.HexColor("#1f3a5f"))
+    canvas.setLineWidth(0.5)
+    canvas.line(doc.leftMargin, A4[1] - 28, page_width - doc.rightMargin, A4[1] - 28)
+
+    canvas.setFillColor(colors.HexColor("#1f3a5f"))
+    canvas.setFont("Helvetica-Bold", 8)
+    canvas.drawString(doc.leftMargin, A4[1] - 24, tr(language, "pdf_footer_project"))
+    canvas.setFont("Helvetica", 8)
+    canvas.drawCentredString(page_width / 2, A4[1] - 24, datetime.now().strftime("%d/%m/%Y"))
+    canvas.drawRightString(page_width - doc.rightMargin, A4[1] - 24, tr(language, "pdf_footer_page", page=doc.page))
+
+    # Footer
     canvas.setStrokeColor(colors.HexColor("#b8c4d6"))
-    canvas.line(doc.leftMargin, 22, A4[0] - doc.rightMargin, 22)
+    canvas.line(doc.leftMargin, 22, page_width - doc.rightMargin, 22)
 
     canvas.setFillColor(colors.HexColor("#556273"))
-    canvas.setFont("Helvetica", 9)
+    canvas.setFont("Helvetica", 8)
     canvas.drawString(doc.leftMargin, 10, tr(language, "pdf_footer_project"))
-    canvas.drawRightString(A4[0] - doc.rightMargin, 10, tr(language, "pdf_footer_page", page=doc.page))
+    canvas.drawRightString(page_width - doc.rightMargin, 10, tr(language, "pdf_footer_page", page=doc.page))
     canvas.restoreState()
 
 
@@ -779,7 +1189,10 @@ def _export_monthly_pdf(
     transactions: list[dict[str, Any]],
     language: str,
     year_month: str | None,
+    budget_rows: list[dict[str, Any]] | None = None,
 ) -> None:
+    from expenses_tracker.charts import generate_all_figures
+
     if not transactions:
         raise ValueError(tr(language, "warning_no_transactions_export"))
 
@@ -807,18 +1220,41 @@ def _export_monthly_pdf(
     elements: list[Any] = []
 
     summary_metrics = _compute_summary_metrics(month_transactions, month_category_rows, month_rows_local)
-    summary_data = _build_executive_summary(summary_metrics, language)
 
-    # Custom cover for monthly report
+    # Premium cover
     elements.append(_build_monthly_cover_banner(target_month, styles, language))
-    elements.append(Spacer(1, 12))
-    elements.append(_build_kpi_table(summary_metrics, styles, language))
-    elements.append(Spacer(1, 10))
-
-    elements.append(Paragraph(tr(language, "pdf_exec_summary"), styles["section_title"]))
-    elements.append(Paragraph(summary_data, styles["body_text"]))
+    elements.append(Spacer(1, 16))
+    elements.append(_build_kpi_dashboard(summary_metrics, styles, language))
     elements.append(PageBreak())
 
+    # Trend analysis
+    elements.extend(_build_trend_analysis_section(summary_metrics, month_rows_local, styles, language))
+
+    # Charts
+    figures = generate_all_figures(month_category_rows, month_rows_local, language, "default")
+    chart_title_map = {
+        "line": "pdf_chart_evolution",
+        "bar": "pdf_chart_categories",
+        "pie": "pdf_chart_distribution",
+        "scatter": "pdf_chart_scatter",
+        "bar3d": "pdf_chart_3d",
+        "forecast": "pdf_chart_forecast",
+        "sankey": "pdf_chart_sankey",
+    }
+    for chart_key in ["line", "bar", "pie", "scatter", "bar3d", "forecast", "sankey"]:
+        if chart_key in figures:
+            elements.extend(_build_chart_section(
+                figures[chart_key],
+                chart_title_map[chart_key],
+                styles,
+                language,
+            ))
+
+    # Budget section for this month
+    if budget_rows:
+        elements.extend(_build_budget_section(budget_rows, styles, language))
+
+    # Category table
     category_table_rows = [
         [
             _escape_reportlab(str(row["category"])),
@@ -845,6 +1281,7 @@ def _export_monthly_pdf(
         language=language,
     )
 
+    # Transactions table
     movement_table_rows = [
         [
             _escape_reportlab(str(row["transaction_date"])),

@@ -88,6 +88,11 @@ def _build_parser(language: str) -> argparse.ArgumentParser:
         default="reports",
         help=tr(language, "arg_output_dir"),
     )
+    export_parser.add_argument(
+        "--budget-month",
+        default=None,
+        help="Include budget analysis for a specific month (YYYY-MM)",
+    )
 
     return parser
 
@@ -180,7 +185,7 @@ def main() -> int:
 
     if args.command == "export":
         database.initialize()
-        _export_reports(database, args.export_format, args.output_dir, language)
+        _export_reports(database, args.export_format, args.output_dir, language, getattr(args, "budget_month", None))
         return 0
 
     parser.print_help()
@@ -259,7 +264,13 @@ def _generate_plots(database: ExpenseDatabase, plot_type: str, output_dir: str, 
         print(tr(language, "chart_generated", path=file_path))
 
 
-def _export_reports(database: ExpenseDatabase, export_format: str, output_dir: str, language: str) -> None:
+def _export_reports(
+    database: ExpenseDatabase,
+    export_format: str,
+    output_dir: str,
+    language: str,
+    budget_month: str | None = None,
+) -> None:
     transactions = database.fetch_transactions(limit=None)
     category_rows = database.get_totals_by_category()
     month_rows = database.get_totals_by_month()
@@ -268,6 +279,12 @@ def _export_reports(database: ExpenseDatabase, export_format: str, output_dir: s
         print(tr(language, "no_report_data"))
         return
 
+    budget_rows: list[dict[str, Any]] | None = None
+    if budget_month:
+        budget_rows = database.get_budget_vs_actual(budget_month)
+        if not budget_rows:
+            budget_rows = None
+
     generated_files = export_reports(
         transactions=transactions,
         category_rows=category_rows,
@@ -275,6 +292,7 @@ def _export_reports(database: ExpenseDatabase, export_format: str, output_dir: s
         output_dir=output_dir,
         fmt=export_format,
         language=language,
+        budget_rows=budget_rows,
     )
 
     if not generated_files:

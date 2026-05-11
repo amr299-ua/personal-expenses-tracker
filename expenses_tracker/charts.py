@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import io
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -104,6 +105,39 @@ def generate_charts(
         pass
 
     return generated_files
+
+
+def figure_to_png_bytes(figure: Figure, dpi: int = 150) -> bytes:
+    """Render a matplotlib Figure to PNG bytes in memory without disk I/O."""
+    buf = io.BytesIO()
+    figure.savefig(buf, format="png", dpi=dpi, bbox_inches="tight")
+    plt.close(figure)
+    buf.seek(0)
+    return buf.getvalue()
+
+
+def generate_all_figures(
+    category_rows: list[dict[str, Any]],
+    month_rows: list[dict[str, Any]],
+    language: str = "en",
+    palette: str = "default",
+) -> dict[str, Figure]:
+    """Generate all available chart figures and return as a dict keyed by chart type."""
+    colors = get_palette(palette)
+    figures: dict[str, Figure] = {}
+
+    if category_rows:
+        figures["bar"] = category_totals_figure(category_rows, language, colors)
+        figures["pie"] = category_pie_figure(category_rows, language, colors)
+        figures["sankey"] = sankey_figure(category_rows, language, colors)
+
+    if month_rows:
+        figures["line"] = month_totals_figure(month_rows, language, colors)
+        figures["scatter"] = month_scatter_figure(month_rows, language, colors)
+        figures["bar3d"] = month_bars_3d_figure(month_rows, language, colors)
+        figures["forecast"] = forecast_figure(month_rows, language, colors)
+
+    return figures
 
 
 def generate_budget_chart(

@@ -159,8 +159,8 @@ def seed(n_transactions: int = 500) -> None:
         rows.append((amount, ttype, cat, d.isoformat(), desc))
 
     cur.executemany(
-        "INSERT INTO transactions (amount, transaction_type, category, transaction_date, description) "
-        "VALUES (?, ?, ?, ?, ?)",
+        "INSERT INTO transactions (amount, transaction_type, category, transaction_date, description, currency, recurring, created_at) "
+        "VALUES (?, ?, ?, ?, ?, 'EUR', 0, datetime('now'))",
         rows,
     )
     conn.commit()
