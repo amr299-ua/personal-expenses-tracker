@@ -166,6 +166,7 @@ class BudgetTab:
                     status,
                 ),
                 tags=(tag,),
+                text=str(row.get("id") or ""),
             )
 
         self.budget_tree.tag_configure("over", foreground=self.app.theme_manager.colors["negative"])
@@ -202,7 +203,8 @@ class BudgetTab:
         selection = self.budget_tree.selection()
         if not selection:
             return
-        values = self.budget_tree.item(selection[0], "values")
+        item_data = self.budget_tree.item(selection[0])
+        values = item_data["values"]
         if len(values) < 6:
             return
         self.budget_category_var.set(str(values[0]))
@@ -212,7 +214,8 @@ class BudgetTab:
         decimal = locale_cfg.get("decimal_separator", ".")
         planned_str = str(values[1]).replace(thousands, "").replace(decimal, ".")
         self.planned_var.set(planned_str)
-        self._selected_budget_id = None
+        budget_id_str = str(item_data.get("text", "")).strip()
+        self._selected_budget_id = int(budget_id_str) if budget_id_str.isdigit() else None
 
     def _save_budget(self) -> None:
         category = self.budget_category_var.get().strip()
@@ -259,9 +262,12 @@ class BudgetTab:
             )
             return
 
-        values = self.budget_tree.item(selection[0], "values")
+        item_data = self.budget_tree.item(selection[0])
+        values = item_data["values"]
         category = str(values[0])
         month = self.month_var.get().strip()
+
+        budget_id = self._selected_budget_id
 
         confirm = messagebox.askyesno(
             tr(self.app.language, "confirm_delete_title"),
@@ -270,14 +276,6 @@ class BudgetTab:
         )
         if not confirm:
             return
-
-        # Find budget ID by category+month
-        budgets = self.app.transaction_service.fetch_budgets(month=month)
-        budget_id = None
-        for b in budgets:
-            if b["category"] == category:
-                budget_id = b["id"]
-                break
 
         if budget_id is None:
             messagebox.showerror(

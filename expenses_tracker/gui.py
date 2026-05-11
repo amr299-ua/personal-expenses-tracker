@@ -71,6 +71,7 @@ def _resolve_or_create(name: str, factory: Callable[[], Any]) -> Any:
     """Helper to resolve from DI container or create a new instance."""
     return _di_container.resolve(name) if _di_container.has(name) else factory()
 
+
 class ExpensesApp(tk.Tk):
     def __init__(
         self,
@@ -85,7 +86,9 @@ class ExpensesApp(tk.Tk):
     ) -> None:
         super().__init__()
 
-        self.state_service = state_service or _resolve_or_create("state_service", lambda: UIStateService("data/ui_state.json"))
+        self.state_service = state_service or _resolve_or_create(
+            "state_service", lambda: UIStateService("data/ui_state.json")
+        )
         self._state = self.state_service.read()
         self.language = normalize_language(initial_language or str(self._state.get("language", "en")))
 
@@ -114,12 +117,8 @@ class ExpensesApp(tk.Tk):
             "transaction_service", lambda: TransactionService(self.database)
         )
         self.export_service = export_service or _resolve_or_create("export_service", lambda: ExportService())
-        self.database_service = _resolve_or_create(
-            "database_service", lambda: DatabaseService(self.database)
-        )
-        self.currency_service = _resolve_or_create(
-            "currency_service", lambda: CurrencyService(self.database)
-        )
+        self.database_service = _resolve_or_create("database_service", lambda: DatabaseService(self.database))
+        self.currency_service = _resolve_or_create("currency_service", lambda: CurrencyService(self.database))
         self.category_suggestion_service = _resolve_or_create(
             "category_suggestion_service", lambda: CategorySuggestionService()
         )
@@ -139,6 +138,7 @@ class ExpensesApp(tk.Tk):
         self.search_var = tk.StringVar(value=str(self._state.get("search", "")))
         self.filter_type_key = self._normalize_filter_type_key(str(self._state.get("filter_type_key", "all")))
         self.filter_category_var = tk.StringVar(value=str(self._state.get("filter_category", "")))
+        self.filter_tags_var = tk.StringVar(value=str(self._state.get("filter_tags", "")))
         self.filter_from_var = tk.StringVar(value=str(self._state.get("filter_from", "")))
         self.filter_to_var = tk.StringVar(value=str(self._state.get("filter_to", "")))
         self.filtered_count_var = tk.StringVar(value=tr(self.language, "showing_rows", filtered=0, total=0))
@@ -172,9 +172,15 @@ class ExpensesApp(tk.Tk):
         self._date_indicator: ttk.Label | None = None
         self._category_indicator: ttk.Label | None = None
 
-        self.balance_var = tk.StringVar(value=tr(self.language, "balance_label", amount=format_number(self.language, 0.0)))
-        self.income_var = tk.StringVar(value=tr(self.language, "income_total_label", amount=format_number(self.language, 0.0)))
-        self.expense_var = tk.StringVar(value=tr(self.language, "expense_total_label", amount=format_number(self.language, 0.0)))
+        self.balance_var = tk.StringVar(
+            value=tr(self.language, "balance_label", amount=format_number(self.language, 0.0))
+        )
+        self.income_var = tk.StringVar(
+            value=tr(self.language, "income_total_label", amount=format_number(self.language, 0.0))
+        )
+        self.expense_var = tk.StringVar(
+            value=tr(self.language, "expense_total_label", amount=format_number(self.language, 0.0))
+        )
         self.filter_type_var = tk.StringVar()
         self.language_var = tk.StringVar()
         self._last_totals = {"balance": 0.0, "income": 0.0, "expense": 0.0}
@@ -235,9 +241,15 @@ class ExpensesApp(tk.Tk):
         self.language_var.set(language_label(self.language))
         self.type_var.set(self._type_db_to_display.get(self.register_type_key, tr(self.language, "type_expense")))
         self.filter_type_var.set(self._filter_key_to_display.get(self.filter_type_key, self._all_label))
-        self.balance_var.set(tr(self.language, "balance_label", amount=format_number(self.language, self._last_totals["balance"])))
-        self.income_var.set(tr(self.language, "income_total_label", amount=format_number(self.language, self._last_totals["income"])))
-        self.expense_var.set(tr(self.language, "expense_total_label", amount=format_number(self.language, self._last_totals["expense"])))
+        self.balance_var.set(
+            tr(self.language, "balance_label", amount=format_number(self.language, self._last_totals["balance"]))
+        )
+        self.income_var.set(
+            tr(self.language, "income_total_label", amount=format_number(self.language, self._last_totals["income"]))
+        )
+        self.expense_var.set(
+            tr(self.language, "expense_total_label", amount=format_number(self.language, self._last_totals["expense"]))
+        )
 
     def _chart_type_options(self) -> list[tuple[str, str]]:
         return [
@@ -258,139 +270,58 @@ class ExpensesApp(tk.Tk):
         self._i18n_widgets = []
 
         self.title(tr(self.language, "app_title"))
-        self._container = ttk.Frame(self, padding=16, style="App.TFrame")
+        self._container = ttk.Frame(self, padding=(16, 8, 16, 8), style="App.TFrame")
         self._container.pack(fill="both", expand=True)
 
+        # ── Menubar ──────────────────────────────────────────────────
+        self._build_menubar()
+
+        # ── Header ───────────────────────────────────────────────────
         header = ttk.Frame(self._container, padding=14, style="Header.TFrame")
         header.pack(fill="x", pady=(0, 8))
 
         heading_side = "right" if is_rtl(self.language) else "left"
         buttons_side = "left" if is_rtl(self.language) else "right"
-        heading_anchor = "e" if is_rtl(self.language) else "w"
 
         heading = ttk.Frame(header, style="Header.TFrame")
         heading.pack(side=heading_side, fill="x", expand=True)
 
         header_title = ttk.Label(heading, style="HeaderTitle.TLabel")
         self._set_i18n_text(header_title, "header_title")
-        header_title.pack(anchor=heading_anchor)
-        header_subtitle = ttk.Label(
-            heading,
-            style="HeaderSubtitle.TLabel",
-        )
+        header_title.pack(anchor="e" if is_rtl(self.language) else "w")
+        header_subtitle = ttk.Label(heading, style="HeaderSubtitle.TLabel")
         self._set_i18n_text(header_subtitle, "header_subtitle")
-        header_subtitle.pack(anchor=heading_anchor, pady=(2, 0))
+        header_subtitle.pack(anchor="e" if is_rtl(self.language) else "w", pady=(2, 0))
 
-        buttons = ttk.Frame(header, style="Header.TFrame")
-        buttons.pack(side=buttons_side)
+        # ── Toolbar ──────────────────────────────────────────────────
+        toolbar = ttk.Frame(header, style="Header.TFrame")
+        toolbar.pack(side=buttons_side)
 
-        language_label_widget = ttk.Label(buttons, style="HeaderSubtitle.TLabel")
-        self._set_i18n_text(language_label_widget, "label_language")
-        language_label_widget.pack(side="left", padx=(0, 6))
-        language_box = ttk.Combobox(
-            buttons,
-            textvariable=self.language_var,
-            values=list(self._language_display_to_code.keys()),
-            state="readonly",
-            width=16,
-        )
-        language_box.pack(side="left", padx=3)
-        language_box.bind("<<ComboboxSelected>>", lambda _event: self._on_language_change())
-        self._apply_rtl_to_widget(language_box)
-        self.language_box = language_box
+        # Row 1: primary actions
+        toolbar_row1 = ttk.Frame(toolbar, style="Header.TFrame")
+        toolbar_row1.pack(side="bottom", fill="x")
 
-        self.theme_button = ttk.Button(buttons, text=tr(self.language, "btn_dark_mode"), style="Ghost.TButton", command=self._toggle_theme)
-        self.theme_button.pack(side="left", padx=3)
-        self._update_theme_button_text()
+        self._toolbar_btn(toolbar_row1, self._refresh_all, "btn_refresh")
 
-        self.palette_var = tk.StringVar(value=self.theme_manager.palette)
-        palette_box = ttk.Combobox(
-            buttons,
-            textvariable=self.palette_var,
-            values=list(PALETTES.keys()),
-            state="readonly",
-            width=12,
-        )
-        palette_box.pack(side="left", padx=3)
-        palette_box.bind("<<ComboboxSelected>>", lambda _event: self._on_palette_change())
-        self._apply_rtl_to_widget(palette_box)
-        self.palette_box = palette_box
+        ttk.Separator(toolbar_row1, orient="vertical").pack(side="left", padx=4, fill="y")
 
-        btn_refresh = ttk.Button(buttons, style="Ghost.TButton", command=self._refresh_all)
-        self._set_i18n_text(btn_refresh, "btn_refresh")
-        btn_refresh.pack(side="left", padx=3)
-        self._apply_rtl_to_widget(btn_refresh)
-
-        btn_charts = ttk.Button(
-            buttons,
-            style="Ghost.TButton",
-            command=self._generate_charts,
-        )
-        self._set_i18n_text(btn_charts, "btn_make_charts")
-        btn_charts.pack(side="left", padx=3)
-        self._apply_rtl_to_widget(btn_charts)
-
-        btn_automation = ttk.Button(
-            buttons,
-            style="Ghost.TButton",
-            command=self._open_automation_dialog,
-        )
-        self._set_i18n_text(btn_automation, "btn_automation")
-        btn_automation.pack(side="left", padx=3)
-        self._apply_rtl_to_widget(btn_automation)
-
-        lock_key = "btn_set_lock" if not LockManager.is_lock_set() else "btn_remove_lock"
-        btn_lock = ttk.Button(buttons, style="Ghost.TButton", command=self._toggle_lock)
-        self._set_i18n_text(btn_lock, lock_key)
-        btn_lock.pack(side="left", padx=3)
-        self._apply_rtl_to_widget(btn_lock)
-
-        btn_backup = ttk.Button(buttons, style="Ghost.TButton", command=self._create_backup)
-        self._set_i18n_text(btn_backup, "btn_backup")
-        btn_backup.pack(side="left", padx=3)
-        self._apply_rtl_to_widget(btn_backup)
-
-        btn_cloud = ttk.Button(
-            buttons,
-            style="Ghost.TButton",
-            command=self._open_cloud_sync_dialog,
-        )
-        self._set_i18n_text(btn_cloud, "btn_cloud_sync")
-        btn_cloud.pack(side="left", padx=3)
-        self._apply_rtl_to_widget(btn_cloud)
-
-        if not SQLCipherManager.is_encrypted_db(Path(self.database_service.db_path)):
-            btn_encrypt = ttk.Button(
-                buttons,
-                style="Ghost.TButton",
-                command=self._encrypt_database,
-            )
-            self._set_i18n_text(btn_encrypt, "btn_encrypt_db")
-            btn_encrypt.pack(side="left", padx=3)
-            self._apply_rtl_to_widget(btn_encrypt)
+        self._toolbar_btn(toolbar_row1, self._import_file, "btn_import")
 
         self.export_format_var = tk.StringVar(value="excel")
         export_format_box = ttk.Combobox(
-            buttons,
+            toolbar_row1,
             textvariable=self.export_format_var,
             values=["excel", "csv", "pdf", "json", "yaml", "html", "monthly_pdf", "all"],
             state="readonly",
-            width=12,
+            width=10,
         )
         export_format_box.pack(side="left", padx=3)
         self._apply_rtl_to_widget(export_format_box)
 
-        btn_export = ttk.Button(
-            buttons,
-            style="Ghost.TButton",
-            command=lambda: self._export(self.export_format_var.get()),
-        )
-        self._set_i18n_text(btn_export, "btn_export")
-        btn_export.pack(side="left", padx=3)
-        self._apply_rtl_to_widget(btn_export)
+        self._toolbar_btn(toolbar_row1, lambda: self._export(self.export_format_var.get()), "btn_export")
 
         btn_quick = ttk.Button(
-            buttons,
+            toolbar_row1,
             style="Accent.TButton",
             command=self._quick_export,
         )
@@ -398,12 +329,33 @@ class ExpensesApp(tk.Tk):
         btn_quick.pack(side="left", padx=3)
         self._apply_rtl_to_widget(btn_quick)
 
+        # Row 2: view/display controls
+        toolbar_row2 = ttk.Frame(toolbar, style="Header.TFrame")
+        toolbar_row2.pack(side="bottom", fill="x", pady=(4, 0))
+
+        self.language_box = self._toolbar_combobox(
+            toolbar_row2, self.language_var, list(self._language_display_to_code.keys()), width=14
+        )
+        self.language_box.bind("<<ComboboxSelected>>", lambda _event: self._on_language_change())
+        self._apply_rtl_to_widget(self.language_box)
+
+        self.theme_button = ttk.Button(toolbar_row2, style="Ghost.TButton", command=self._toggle_theme)
+        self.theme_button.pack(side="left", padx=3)
+        self._update_theme_button_text()
+
+        self.palette_var = tk.StringVar(value=self.theme_manager.palette)
+        self.palette_box = self._toolbar_combobox(toolbar_row2, self.palette_var, list(PALETTES.keys()), width=10)
+        self.palette_box.bind("<<ComboboxSelected>>", lambda _event: self._on_palette_change())
+        self._apply_rtl_to_widget(self.palette_box)
+
+        # ── Metrics row ──────────────────────────────────────────────
         metrics_row = ttk.Frame(self._container, style="App.TFrame")
         metrics_row.pack(fill="x", pady=(0, 8))
         self.balance_label = self._build_metric_card(metrics_row, self.balance_var, padx=(0, 6))
         self.income_label = self._build_metric_card(metrics_row, self.income_var, padx=(0, 6))
         self.expense_label = self._build_metric_card(metrics_row, self.expense_var, padx=(0, 0))
 
+        # ── Notebook (tabs) ──────────────────────────────────────────
         notebook_shell = ttk.Frame(self._container, style="Card.TFrame", padding=6)
         notebook_shell.pack(fill="both", expand=True)
 
@@ -426,6 +378,90 @@ class ExpensesApp(tk.Tk):
         self._build_transactions_tab(tab_transactions)
         self._build_stats_tab(tab_stats)
         self._build_budget_tab(tab_budget)
+
+    def _toolbar_btn(self, parent: ttk.Frame, command: Callable[[], Any], i18n_key: str) -> ttk.Button:
+        btn = ttk.Button(parent, style="Ghost.TButton", command=command)
+        self._set_i18n_text(btn, i18n_key)
+        btn.pack(side="left", padx=3)
+        self._apply_rtl_to_widget(btn)
+        return btn
+
+    def _toolbar_combobox(
+        self, parent: ttk.Frame, variable: tk.StringVar, values: list[str], width: int = 12
+    ) -> ttk.Combobox:
+        box = ttk.Combobox(parent, textvariable=variable, values=values, state="readonly", width=width)
+        box.pack(side="left", padx=3)
+        return box
+
+    def _build_menubar(self) -> None:
+        menubar = tk.Menu(self)
+
+        file_menu = tk.Menu(menubar, tearoff=0)
+        file_menu.add_command(label=tr(self.language, "btn_import"), command=self._import_file, accelerator="Alt+I")
+        file_menu.add_command(
+            label=tr(self.language, "btn_export"),
+            command=lambda: self._export(self.export_format_var.get()),
+            accelerator="Ctrl+E",
+        )
+        file_menu.add_separator()
+        file_menu.add_command(label=tr(self.language, "btn_close"), command=self._on_close)
+        menubar.add_cascade(label=tr(self.language, "menu_file"), menu=file_menu)
+
+        view_menu = tk.Menu(menubar, tearoff=0)
+        view_menu.add_command(label=tr(self.language, "btn_dark_mode"), command=self._toggle_theme, accelerator="Alt+T")
+        view_menu.add_command(label=tr(self.language, "btn_refresh"), command=self._refresh_all, accelerator="F5")
+        view_menu.add_separator()
+
+        language_submenu = tk.Menu(view_menu, tearoff=0)
+        for display, code in self._language_display_to_code.items():
+            language_submenu.add_radiobutton(
+                label=display,
+                value=code,
+                variable=tk.StringVar(value=self.language),
+                command=lambda c=code: self._on_language_menu_change(c),
+            )
+        view_menu.add_cascade(label=tr(self.language, "label_language"), menu=language_submenu)
+
+        palette_submenu = tk.Menu(view_menu, tearoff=0)
+        for pname in PALETTES:
+            palette_submenu.add_radiobutton(
+                label=pname,
+                value=pname,
+                variable=tk.StringVar(value=self.theme_manager.palette),
+                command=lambda p=pname: self._on_palette_menu_change(p),
+            )
+        view_menu.add_cascade(label=tr(self.language, "label_palette"), menu=palette_submenu)
+        menubar.add_cascade(label=tr(self.language, "menu_view"), menu=view_menu)
+
+        tools_menu = tk.Menu(menubar, tearoff=0)
+        tools_menu.add_command(
+            label=tr(self.language, "btn_make_charts"), command=self._generate_charts, accelerator="Ctrl+G"
+        )
+        tools_menu.add_command(label=tr(self.language, "btn_automation"), command=self._open_automation_dialog)
+        tools_menu.add_separator()
+        tools_menu.add_command(label=tr(self.language, "btn_backup"), command=self._create_backup)
+        tools_menu.add_command(label=tr(self.language, "btn_cloud_sync"), command=self._open_cloud_sync_dialog)
+
+        lock_key = "btn_set_lock" if not LockManager.is_lock_set() else "btn_remove_lock"
+        tools_menu.add_command(label=tr(self.language, lock_key), command=self._toggle_lock)
+
+        if not SQLCipherManager.is_encrypted_db(Path(self.database_service.db_path)):
+            tools_menu.add_command(label=tr(self.language, "btn_encrypt_db"), command=self._encrypt_database)
+        menubar.add_cascade(label=tr(self.language, "menu_tools"), menu=tools_menu)
+
+        self.config(menu=menubar)
+
+    def _on_language_menu_change(self, code: str) -> None:
+        if code == self.language:
+            return
+        self.language_var.set(language_label(code))
+        self._on_language_change()
+
+    def _on_palette_menu_change(self, palette: str) -> None:
+        if palette == self.theme_manager.palette:
+            return
+        self.palette_var.set(palette)
+        self._on_palette_change()
 
     def _rtl_text(self, text: str) -> str:
         if is_rtl(self.language):
@@ -477,10 +513,13 @@ class ExpensesApp(tk.Tk):
 
     def _build_register_tab(self, parent: ttk.Frame) -> None:
         self._register_tab = RegisterTab(parent, self)
+
     def _build_transactions_tab(self, parent: ttk.Frame) -> None:
         self._transactions_tab = TransactionsTab(parent, self)
+
     def _build_stats_tab(self, parent: ttk.Frame) -> None:
         self._stats_tab = StatsTab(parent, self)
+
     def _build_budget_tab(self, parent: ttk.Frame) -> None:
         self._budget_tab = BudgetTab(parent, self)
 
@@ -632,6 +671,7 @@ class ExpensesApp(tk.Tk):
             "register_type_key": self.register_type_key,
             "filter_type_key": self.filter_type_key,
             "filter_category": self.filter_category_var.get(),
+            "filter_tags": self.filter_tags_var.get(),
             "filter_from": self.filter_from_var.get(),
             "filter_to": self.filter_to_var.get(),
             "sort_column": self.sort_column,
@@ -713,7 +753,9 @@ class ExpensesApp(tk.Tk):
             key = SQLCipherManager.generate_key()
             SQLCipherManager.migrate_to_encrypted(Path(self.database_service.db_path), key)
             SQLCipherManager.store_key(key, pin)
-            FileAuditLog.log(FileAuditLog.ACTION_LOCK_SET, entity="database", details="Database encrypted with SQLCipher")
+            FileAuditLog.log(
+                FileAuditLog.ACTION_LOCK_SET, entity="database", details="Database encrypted with SQLCipher"
+            )
             messagebox.showinfo(
                 tr(self.language, "success"),
                 tr(self.language, "db_encrypted_success"),
@@ -828,6 +870,10 @@ class ExpensesApp(tk.Tk):
         self.bind_all("<Control-2>", lambda _event: self._select_tab(1))
         self.bind_all("<Control-3>", lambda _event: self._select_tab(2))
         self.bind_all("<Control-4>", lambda _event: self._select_tab(3))
+        self.bind_all("<Alt-r>", lambda _event: self._refresh_all())
+        self.bind_all("<Alt-t>", lambda _event: self._toggle_theme())
+        self.bind_all("<Alt-i>", lambda _event: self._import_file())
+        self.bind_all("<Escape>", lambda _event: self._shortcut_focus_search())
 
     def _shortcut_new_transaction(self) -> None:
         focused = self.focus_get()
@@ -929,7 +975,7 @@ class ExpensesApp(tk.Tk):
         )
 
     def _open_cloud_sync_dialog(self) -> None:
-        from expenses_tracker.security import KeyDerivation
+        from expenses_tracker.security import CloudSyncSaltManager, KeyDerivation
 
         encryption_key = None
         if LockManager.is_lock_set():
@@ -937,9 +983,7 @@ class ExpensesApp(tk.Tk):
             dialog = LockScreenDialog(self, self.language, mode="unlock", current_hash=stored_hash)
             self.wait_window(dialog)
             if dialog.success:
-                # Derive a deterministic key from the PIN for cloud encryption
-                # We use a fixed salt for cloud sync so the same PIN always produces the same key
-                salt = b"cloud_sync_salt_fixed_32bytes!"
+                salt = CloudSyncSaltManager.get_or_create_salt()
                 encryption_key, _ = KeyDerivation.derive_key(dialog.pin_var.get(), salt)
 
         CloudSyncDialog(
@@ -963,6 +1007,7 @@ class ExpensesApp(tk.Tk):
             date_from=date_from,
             date_to=date_to,
             type_db_to_display=self._type_db_to_display,
+            tags_filter=self.filter_tags_var.get(),
         )
         if not transactions:
             messagebox.showwarning(
@@ -1047,6 +1092,43 @@ class ExpensesApp(tk.Tk):
 
         files_text = "\n".join(path.as_posix() for path in generated)
         messagebox.showinfo(tr(self.language, "info_reports_generated"), files_text, parent=self)
+
+    def _import_file(self) -> None:
+        """Open a file dialog and import transactions from CSV/Excel/JSON."""
+        from tkinter import filedialog
+
+        from expenses_tracker.importers import import_and_save
+
+        filetypes = [
+            ("All supported", "*.csv *.xlsx *.xls *.json"),
+            ("CSV files", "*.csv"),
+            ("Excel files", "*.xlsx *.xls"),
+            ("JSON files", "*.json"),
+        ]
+        filepath = filedialog.askopenfilename(
+            title=tr(self.language, "btn_import"),
+            filetypes=filetypes,
+            parent=self,
+        )
+        if not filepath:
+            return
+
+        try:
+            count = import_and_save(filepath, self.database, language=self.language)
+        except Exception as error:
+            messagebox.showerror(
+                tr(self.language, "error_generic"),
+                tr(self.language, "import_failed", error=error),
+                parent=self,
+            )
+            return
+
+        messagebox.showinfo(
+            tr(self.language, "success"),
+            tr(self.language, "import_success", count=count),
+            parent=self,
+        )
+        self._refresh_all()
 
     @staticmethod
     def _clear_tree(tree: ttk.Treeview) -> None:

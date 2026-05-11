@@ -52,6 +52,9 @@ class TransactionsTab:
         lbl_to = ttk.Label(filters)
         self.app._set_i18n_text(lbl_to, "label_to")
         lbl_to.grid(row=0, column=4, sticky=label_sticky)
+        lbl_tags = ttk.Label(filters)
+        self.app._set_i18n_text(lbl_tags, "label_tags")
+        lbl_tags.grid(row=0, column=5, sticky=label_sticky)
 
         search_entry = ttk.Entry(
             filters,
@@ -127,8 +130,18 @@ class TransactionsTab:
             ),
         ).pack(side="left", padx=(4, 0))
 
+        tags_entry = ttk.Entry(
+            filters,
+            textvariable=self.app.filter_tags_var,
+            width=14,
+            justify="right" if is_rtl(self.app.language) else "left",
+        )
+        tags_entry.grid(row=1, column=5, sticky="we", padx=(0, 8), pady=(2, 0))
+        tags_entry.bind("<KeyRelease>", lambda _event: self._on_filter_change())
+        self.app.filter_tags_entry = tags_entry
+
         filter_actions = ttk.Frame(filters, style="Card.TFrame")
-        filter_actions.grid(row=1, column=5, sticky="e")
+        filter_actions.grid(row=1, column=6, sticky="e")
         btn_apply = ttk.Button(
             filter_actions,
             style="Accent.TButton",
@@ -148,7 +161,7 @@ class TransactionsTab:
         self.app._apply_rtl_to_widget(btn_clear_filters)
 
         quick_ranges = ttk.Frame(filters, style="Card.TFrame")
-        quick_ranges.grid(row=2, column=0, columnspan=6, sticky=label_sticky, pady=(8, 0))
+        quick_ranges.grid(row=2, column=0, columnspan=7, sticky=label_sticky, pady=(8, 0))
         lbl_quick_dates = ttk.Label(quick_ranges)
         self.app._set_i18n_text(lbl_quick_dates, "label_quick_dates")
         lbl_quick_dates.pack(side="left", padx=(0, 6))
@@ -162,7 +175,7 @@ class TransactionsTab:
             btn.pack(side="left", padx=2)
             self.app._apply_rtl_to_widget(btn)
 
-        for column_index in range(5):
+        for column_index in range(7):
             filters.columnconfigure(column_index, weight=1)
 
         self.app.search_var.trace_add("write", self._on_search_change)
@@ -263,6 +276,7 @@ class TransactionsTab:
             date_from=date_from,
             date_to=date_to,
             type_db_to_display=self.app._type_db_to_display,
+            tags_filter=self.app.filter_tags_var.get(),
         )
         sorted_rows = self.app.transaction_service.sort_rows(filtered_rows, self.app.sort_column, self.app.sort_desc)
 
@@ -328,6 +342,7 @@ class TransactionsTab:
         self.app.filter_type_key = "all"
         self.app.filter_type_var.set(self.app._filter_key_to_display[self.app.filter_type_key])
         self.app.filter_category_var.set(self.app._all_label)
+        self.app.filter_tags_var.set("")
         self.app.filter_from_var.set("")
         self.app.filter_to_var.set("")
         self._on_filter_change()

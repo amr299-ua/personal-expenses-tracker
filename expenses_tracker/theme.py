@@ -84,6 +84,12 @@ class ThemeManager:
             foreground=self._colors["text"],
             insertcolor=self._colors["text"],
             bordercolor=self._colors["line"],
+            focusthickness=2,
+            focuscolor=self._colors["accent"],
+        )
+        style.map(
+            "TEntry",
+            bordercolor=[("focus", self._colors["accent"])],
         )
         style.configure(
             "TCombobox",
@@ -92,6 +98,8 @@ class ThemeManager:
             background=self._colors["card"],
             arrowcolor=self._colors["text"],
             bordercolor=self._colors["line"],
+            focusthickness=2,
+            focuscolor=self._colors["accent"],
         )
         style.map(
             "TCombobox",
@@ -99,6 +107,7 @@ class ThemeManager:
             foreground=[("readonly", self._colors["text"])],
             selectbackground=[("readonly", self._colors["select_bg"])],
             selectforeground=[("readonly", self._colors["select_fg"])],
+            bordercolor=[("focus", self._colors["accent"])],
         )
         style.configure(
             "TCheckbutton",

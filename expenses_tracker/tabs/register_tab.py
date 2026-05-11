@@ -64,7 +64,10 @@ class RegisterTab:
         amount_field.grid(row=1, column=1, sticky="we", padx=(0, 10), pady=(0, 2))
         amount_justify = "right" if is_rtl(self.app.language) else "left"
         self.app.amount_entry = ttk.Entry(
-            amount_field, textvariable=self.app.amount_var, width=16, justify=amount_justify  # type: ignore[arg-type]
+            amount_field,
+            textvariable=self.app.amount_var,
+            width=16,
+            justify=amount_justify,  # type: ignore[arg-type]
         )
         self.app.amount_entry.pack(side="left", fill="x", expand=True)
         self.app._amount_indicator = ttk.Label(amount_field, text="", width=2)
@@ -88,7 +91,10 @@ class RegisterTab:
         date_field.grid(row=1, column=3, sticky="we", padx=(0, 10), pady=(0, 2))
         date_justify = "right" if is_rtl(self.app.language) else "left"
         self.app.date_entry = ttk.Entry(
-            date_field, textvariable=self.app.date_var, width=14, justify=date_justify  # type: ignore[arg-type]
+            date_field,
+            textvariable=self.app.date_var,
+            width=14,
+            justify=date_justify,  # type: ignore[arg-type]
         )
         self.app.date_entry.pack(side="left", fill="x", expand=True)
         self.app._date_indicator = ttk.Label(date_field, text="", width=2)
