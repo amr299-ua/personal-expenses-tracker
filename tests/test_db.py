@@ -214,7 +214,8 @@ class TestFetchTransactions:
         expected = {
             "id", "amount", "transaction_type", "category",
             "transaction_date", "description", "currency",
-            "tags", "recurring", "created_at",
+            "tags", "recurring", "recurring_interval",
+            "next_recurring_date", "created_at",
         }
         row = populated_db.fetch_transactions(limit=1)[0]
         assert set(row.keys()) == expected

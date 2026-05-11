@@ -72,11 +72,12 @@ class TestReportSchedulerLifecycle:
         )
         scheduler._scheduler.clear.assert_called_once()
 
-    def test_update_schedule_disabled_does_not_add_jobs(self, scheduler: ReportScheduler):
+    def test_update_schedule_disabled_does_not_add_report_jobs(self, scheduler: ReportScheduler):
         scheduler._scheduler = MagicMock()
         scheduler.update_schedule({"enabled": False})
         scheduler._scheduler.clear.assert_called_once()
-        assert not scheduler._scheduler.every.called
+        # Recurring check is always scheduled regardless of automation config
+        scheduler._scheduler.every().day.at().do.assert_called_once_with(scheduler._run_recurring)
 
 
 class TestEmailSending:
