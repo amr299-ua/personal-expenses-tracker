@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import math
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any, cast
 
@@ -30,8 +31,8 @@ from expenses_tracker.schemas import (
 from expenses_tracker.schemas import (
     TransactionInput as _TransactionInput,
 )
+from expenses_tracker.security import AppCrypto, BackupManager, apply_private_permissions
 from expenses_tracker.security import AuditLog as FileAuditLog
-from expenses_tracker.security import BackupManager, apply_private_permissions
 
 # Re-export constants and models for backward compatibility
 TransactionInput = _TransactionInput
@@ -53,30 +54,51 @@ class ExpenseDatabase:
         self.Session = sessionmaker(bind=self.engine)
 
     def initialize(self) -> None:
-        """Create all tables and run Alembic migrations if needed."""
-        Base.metadata.create_all(self.engine)
+        """Run Alembic migrations first, falling back to create_all on failure."""
         self._run_alembic_migrations()
         apply_private_permissions(self.db_path)
 
     def _run_alembic_migrations(self) -> None:
-        """Run pending Alembic migrations programmatically."""
+        """Run pending Alembic migrations programmatically.
+
+        Handles existing databases created via create_all by detecting an
+        empty alembic_version table (which Alembic normally stamps on first
+        migration) and stamping it with the anchor revision before upgrading.
+        """
         from alembic import command
         from alembic.config import Config
 
-        alembic_cfg = Config()
-        alembic_cfg.set_main_option("script_location", "alembic")
+        alembic_ini = Path("alembic.ini")
+        if not alembic_ini.exists():
+            logger.info("alembic.ini not found — creating tables via create_all fallback")
+            Base.metadata.create_all(self.engine)
+            return
+
+        alembic_cfg = Config(str(alembic_ini))
         alembic_cfg.set_main_option("sqlalchemy.url", f"sqlite:///{self.db_path}")
+
         try:
             command.upgrade(alembic_cfg, "head")
+            logger.info("Alembic migrations applied successfully")
+            return
         except Exception:
-            logger.debug("Alembic migration skipped or failed (tables may already exist)")
+            pass
+
+        # Upgrade failed — likely because the DB was created via create_all
+        # and alembic_version is empty. Stamp with the anchor revision
+        # (the last version before new migrations) and retry.
+        try:
+            command.stamp(alembic_cfg, "64a38d947f6f")
+            command.upgrade(alembic_cfg, "head")
+            logger.info("Alembic migrations applied after stamping")
+        except Exception as exc:
+            logger.warning("Alembic migration fully failed: %s", exc)
+            Base.metadata.create_all(self.engine)
 
     def _get_or_create_category(self, session: Any, name: str, transaction_type: str) -> Category:
         """Get existing category or create a new one."""
         name = name.strip()
-        category = session.execute(
-            select(Category).where(Category.name == name)
-        ).scalar_one_or_none()
+        category = session.execute(select(Category).where(Category.name == name)).scalar_one_or_none()
         if category is None:
             category = Category(
                 name=name,
@@ -92,9 +114,8 @@ class ExpenseDatabase:
         """Insert a new transaction and return its ID."""
         self._validate_transaction(transaction, language)
         with self.Session() as session:
-            category_obj = self._get_or_create_category(
-                session, transaction.category, transaction.transaction_type
-            )
+            category_obj = self._get_or_create_category(session, transaction.category, transaction.transaction_type)
+            next_date = self._compute_next_recurring(transaction)
             tx = Transaction(
                 amount=transaction.amount,
                 transaction_type=transaction.transaction_type,
@@ -105,6 +126,8 @@ class ExpenseDatabase:
                 currency=transaction.currency,
                 tags=transaction.tags,
                 recurring=transaction.recurring,
+                recurring_interval=transaction.recurring_interval,
+                next_recurring_date=next_date,
             )
             session.add(tx)
             session.commit()
@@ -121,9 +144,7 @@ class ExpenseDatabase:
             if tx is None:
                 return False
 
-            category_obj = self._get_or_create_category(
-                session, transaction.category, transaction.transaction_type
-            )
+            category_obj = self._get_or_create_category(session, transaction.category, transaction.transaction_type)
             tx.amount = transaction.amount
             tx.transaction_type = transaction.transaction_type
             tx.category_id = category_obj.id
@@ -133,6 +154,8 @@ class ExpenseDatabase:
             tx.currency = transaction.currency
             tx.tags = transaction.tags
             tx.recurring = transaction.recurring
+            tx.recurring_interval = transaction.recurring_interval
+            tx.next_recurring_date = self._compute_next_recurring(transaction)
             session.commit()
         details = f"{transaction.transaction_type} {transaction.amount}"
         self.log_audit(FileAuditLog.ACTION_UPDATE, entity="transaction", entity_id=transaction_id, details=details)
@@ -146,6 +169,7 @@ class ExpenseDatabase:
         with self.Session() as session:
             stmt = (
                 select(Transaction)
+                .where(Transaction.deleted_at.is_(None))
                 .order_by(Transaction.transaction_date.desc(), Transaction.id.desc())
             )
             if limit is not None:
@@ -163,6 +187,8 @@ class ExpenseDatabase:
                 "currency": r.currency,
                 "tags": r.tags,
                 "recurring": r.recurring,
+                "recurring_interval": r.recurring_interval,
+                "next_recurring_date": r.next_recurring_date.isoformat() if r.next_recurring_date else "",
                 "created_at": r.created_at.isoformat() if r.created_at else "",
             }
             for r in rows
@@ -172,14 +198,10 @@ class ExpenseDatabase:
         """Return the current balance (income minus expenses)."""
         with self.Session() as session:
             income = session.execute(
-                select(func.coalesce(func.sum(Transaction.amount), 0)).where(
-                    Transaction.transaction_type == "income"
-                )
+                select(func.coalesce(func.sum(Transaction.amount), 0)).where(Transaction.transaction_type == "income")
             ).scalar()
             expense = session.execute(
-                select(func.coalesce(func.sum(Transaction.amount), 0)).where(
-                    Transaction.transaction_type == "expense"
-                )
+                select(func.coalesce(func.sum(Transaction.amount), 0)).where(Transaction.transaction_type == "expense")
             ).scalar()
         return float(income or 0) - float(expense or 0)
 
@@ -187,14 +209,10 @@ class ExpenseDatabase:
         """Return aggregated totals for income, expense and balance."""
         with self.Session() as session:
             income = session.execute(
-                select(func.coalesce(func.sum(Transaction.amount), 0)).where(
-                    Transaction.transaction_type == "income"
-                )
+                select(func.coalesce(func.sum(Transaction.amount), 0)).where(Transaction.transaction_type == "income")
             ).scalar()
             expense = session.execute(
-                select(func.coalesce(func.sum(Transaction.amount), 0)).where(
-                    Transaction.transaction_type == "expense"
-                )
+                select(func.coalesce(func.sum(Transaction.amount), 0)).where(Transaction.transaction_type == "expense")
             ).scalar()
         income_f = float(income or 0)
         expense_f = float(expense or 0)
@@ -205,16 +223,64 @@ class ExpenseDatabase:
         }
 
     def delete_transaction(self, transaction_id: int) -> bool:
-        """Delete a transaction by ID."""
+        """Soft-delete a transaction by ID (sets deleted_at timestamp)."""
         with self.Session() as session:
-            result = session.execute(
-                delete(Transaction).where(Transaction.id == transaction_id)
-            )
+            tx = session.get(Transaction, transaction_id)
+            if tx is None:
+                return False
+            tx.deleted_at = datetime.now(timezone.utc)
             session.commit()
-            deleted = cast("bool", cast("Any", result).rowcount > 0)
-        if deleted:
-            self.log_audit(FileAuditLog.ACTION_DELETE, entity="transaction", entity_id=transaction_id)
-        return deleted
+        self.log_audit(FileAuditLog.ACTION_DELETE, entity="transaction", entity_id=transaction_id)
+        return True
+
+    def restore_transaction(self, transaction_id: int) -> bool:
+        """Restore a soft-deleted transaction by ID."""
+        with self.Session() as session:
+            tx = session.get(Transaction, transaction_id)
+            if tx is None or tx.deleted_at is None:
+                return False
+            tx.deleted_at = None
+            session.commit()
+        return True
+
+    def purge_deleted_transactions(self) -> int:
+        """Permanently delete all soft-deleted transactions. Returns count."""
+        with self.Session() as session:
+            count = session.execute(delete(Transaction).where(Transaction.deleted_at.isnot(None)))
+            session.commit()
+            return cast("int", cast("Any", count).rowcount)
+
+    def fetch_deleted_transactions(self) -> list[dict[str, Any]]:
+        """Return soft-deleted transactions."""
+        with self.Session() as session:
+            rows = (
+                session.execute(
+                    select(Transaction)
+                    .where(Transaction.deleted_at.isnot(None))
+                    .order_by(Transaction.deleted_at.desc())
+                )
+                .scalars()
+                .all()
+            )
+
+        return [
+            {
+                "id": r.id,
+                "amount": float(r.amount),
+                "transaction_type": r.transaction_type,
+                "category": r.category,
+                "transaction_date": r.transaction_date.isoformat(),
+                "description": r.description,
+                "currency": r.currency,
+                "tags": r.tags,
+                "recurring": r.recurring,
+                "recurring_interval": r.recurring_interval,
+                "next_recurring_date": r.next_recurring_date.isoformat() if r.next_recurring_date else "",
+                "created_at": r.created_at.isoformat() if r.created_at else "",
+                "deleted_at": r.deleted_at.isoformat() if r.deleted_at else "",
+            }
+            for r in rows
+        ]
 
     def get_totals_by_category(self) -> list[dict[str, Any]]:
         """Return income, expense and balance grouped by category."""
@@ -222,15 +288,21 @@ class ExpenseDatabase:
             rows = session.execute(
                 select(
                     Transaction.category,
-                    func.coalesce(func.sum(
-                        case((Transaction.transaction_type == "income", Transaction.amount), else_=0)
-                    ), 0).label("income"),
-                    func.coalesce(func.sum(
-                        case((Transaction.transaction_type == "expense", Transaction.amount), else_=0)
-                    ), 0).label("expense"),
-                    func.coalesce(func.sum(
-                        case((Transaction.transaction_type == "income", Transaction.amount), else_=-Transaction.amount)
-                    ), 0).label("balance"),
+                    func.coalesce(
+                        func.sum(case((Transaction.transaction_type == "income", Transaction.amount), else_=0)), 0
+                    ).label("income"),
+                    func.coalesce(
+                        func.sum(case((Transaction.transaction_type == "expense", Transaction.amount), else_=0)), 0
+                    ).label("expense"),
+                    func.coalesce(
+                        func.sum(
+                            case(
+                                (Transaction.transaction_type == "income", Transaction.amount),
+                                else_=-Transaction.amount,
+                            )
+                        ),
+                        0,
+                    ).label("balance"),
                 )
                 .group_by(Transaction.category)
                 .order_by(Transaction.category.asc())
@@ -252,15 +324,21 @@ class ExpenseDatabase:
             rows = session.execute(
                 select(
                     func.strftime("%Y-%m", Transaction.transaction_date).label("month"),
-                    func.coalesce(func.sum(
-                        case((Transaction.transaction_type == "income", Transaction.amount), else_=0)
-                    ), 0).label("income"),
-                    func.coalesce(func.sum(
-                        case((Transaction.transaction_type == "expense", Transaction.amount), else_=0)
-                    ), 0).label("expense"),
-                    func.coalesce(func.sum(
-                        case((Transaction.transaction_type == "income", Transaction.amount), else_=-Transaction.amount)
-                    ), 0).label("balance"),
+                    func.coalesce(
+                        func.sum(case((Transaction.transaction_type == "income", Transaction.amount), else_=0)), 0
+                    ).label("income"),
+                    func.coalesce(
+                        func.sum(case((Transaction.transaction_type == "expense", Transaction.amount), else_=0)), 0
+                    ).label("expense"),
+                    func.coalesce(
+                        func.sum(
+                            case(
+                                (Transaction.transaction_type == "income", Transaction.amount),
+                                else_=-Transaction.amount,
+                            )
+                        ),
+                        0,
+                    ).label("balance"),
                 )
                 .group_by(func.strftime("%Y-%m", Transaction.transaction_date))
                 .order_by(func.strftime("%Y-%m", Transaction.transaction_date).asc())
@@ -313,9 +391,7 @@ class ExpenseDatabase:
             session.commit()
             return True
 
-    def fetch_categories(
-        self, transaction_type: str | None = None, active_only: bool = True
-    ) -> list[dict[str, Any]]:
+    def fetch_categories(self, transaction_type: str | None = None, active_only: bool = True) -> list[dict[str, Any]]:
         """Return categories, optionally filtered by type and active status."""
         with self.Session() as session:
             stmt = select(Category)
@@ -444,11 +520,15 @@ class ExpenseDatabase:
             ).all()
 
             budget_rows = session.execute(
-                select(Budget.category, Budget.planned_amount).where(Budget.month == month)
+                select(Budget.id, Budget.category, Budget.planned_amount).where(Budget.month == month)
             ).all()
 
-        actual_by_cat = {r.category: float(r.actual) for r in actual_rows}
-        budget_by_cat = {r.category: float(r.planned_amount) for r in budget_rows}
+        actual_by_cat: dict[str, float] = {r.category: float(r.actual) for r in actual_rows}
+        budget_by_cat: dict[str, float] = {}
+        budget_id_by_cat: dict[str, int] = {}
+        for r in budget_rows:
+            budget_by_cat[r.category] = float(r.planned_amount)
+            budget_id_by_cat[r.category] = r.id
         all_categories = sorted(set(actual_by_cat.keys()) | set(budget_by_cat.keys()))
 
         return [
@@ -457,6 +537,7 @@ class ExpenseDatabase:
                 "actual": round(actual_by_cat.get(cat, 0.0), 2),
                 "planned": round(budget_by_cat.get(cat, 0.0), 2),
                 "difference": round(budget_by_cat.get(cat, 0.0) - actual_by_cat.get(cat, 0.0), 2),
+                "id": budget_id_by_cat.get(cat),
             }
             for cat in all_categories
         ]
@@ -565,6 +646,7 @@ class ExpenseDatabase:
         """Return the automation configuration as a dict."""
         with self.Session() as session:
             from expenses_tracker.models import AutomationConfig
+
             row = session.execute(select(AutomationConfig)).scalar_one_or_none()
             if row is None:
                 return {
@@ -594,7 +676,7 @@ class ExpenseDatabase:
                 "smtp_host": row.smtp_host,
                 "smtp_port": row.smtp_port,
                 "smtp_user": row.smtp_user,
-                "smtp_password": row.smtp_password,
+                "smtp_password": AppCrypto.decrypt(row.smtp_password),
                 "email_to": row.email_to,
                 "email_subject": row.email_subject,
                 "last_run": row.last_run.isoformat() if row.last_run else None,
@@ -603,6 +685,7 @@ class ExpenseDatabase:
     def save_automation_config(self, data: dict[str, Any]) -> None:
         """Persist the automation configuration."""
         from expenses_tracker.models import AutomationConfig
+
         with self.Session() as session:
             row = session.execute(select(AutomationConfig)).scalar_one_or_none()
             if row is None:
@@ -618,10 +701,87 @@ class ExpenseDatabase:
             row.smtp_host = data.get("smtp_host") or None
             row.smtp_port = data.get("smtp_port")
             row.smtp_user = data.get("smtp_user") or None
-            row.smtp_password = data.get("smtp_password") or None
+            smtp_password = data.get("smtp_password")
+            row.smtp_password = AppCrypto.encrypt(smtp_password) if smtp_password else None
             row.email_to = data.get("email_to") or None
             row.email_subject = data.get("email_subject") or None
             session.commit()
+
+    # ------------------------------------------------------------------
+    # Recurring transactions
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _compute_next_recurring(transaction: TransactionInput) -> date | None:
+        """Compute the next recurring date based on interval and transaction date."""
+        if not transaction.recurring or not transaction.recurring_interval:
+            return None
+        from datetime import timedelta
+
+        dt = transaction.transaction_date
+        interval = transaction.recurring_interval.strip().lower()
+        if interval == "daily":
+            return dt + timedelta(days=1)
+        if interval == "weekly":
+            return dt + timedelta(weeks=1)
+        if interval == "monthly":
+            if dt.month == 12:
+                return dt.replace(year=dt.year + 1, month=1)
+            return dt.replace(month=dt.month + 1)
+        if interval == "yearly":
+            return dt.replace(year=dt.year + 1)
+        return None
+
+    def process_recurring_transactions(self) -> int:
+        """Create next occurrence for recurring transactions due today. Returns count created."""
+        from datetime import date as date_type
+
+        today = date_type.today()
+        with self.Session() as session:
+            due = (
+                session.execute(
+                    select(Transaction).where(
+                        Transaction.recurring.is_(True),
+                        Transaction.recurring_interval.isnot(None),
+                        Transaction.next_recurring_date <= today,
+                    )
+                )
+                .scalars()
+                .all()
+            )
+
+            created = 0
+            for tx in due:
+                tx_input = TransactionInput(
+                    amount=tx.amount,
+                    transaction_type=tx.transaction_type,
+                    category=tx.category,
+                    transaction_date=tx.next_recurring_date,
+                    description=tx.description,
+                    currency=tx.currency,
+                    tags=tx.tags,
+                    recurring=True,
+                    recurring_interval=tx.recurring_interval,
+                )
+                next_date = self._compute_next_recurring(tx_input)
+                new_tx = Transaction(
+                    amount=tx.amount,
+                    transaction_type=tx.transaction_type,
+                    category_id=tx.category_id,
+                    category=tx.category,
+                    transaction_date=tx.next_recurring_date,
+                    description=tx.description,
+                    currency=tx.currency,
+                    tags=tx.tags,
+                    recurring=True,
+                    recurring_interval=tx.recurring_interval,
+                    next_recurring_date=next_date,
+                )
+                session.add(new_tx)
+                tx.next_recurring_date = next_date
+                created += 1
+            session.commit()
+            return created
 
     # ------------------------------------------------------------------
     # Validation (kept for backward compat)
