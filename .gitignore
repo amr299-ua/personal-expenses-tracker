@@ -441,6 +441,14 @@ data/*.db
 data/ui_state.json
 data/audit_log.jsonl
 data/backups/
+data/.appkey
+data/.cloud_salt
+data/.lock
+data/.lock_active
+data/.key
+data/.dbkey
+data/.portable
+data/cloud_config.json
 reports/*.pdf
 reports/*.xlsx
 reports/*.png
