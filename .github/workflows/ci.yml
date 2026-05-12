@@ -23,20 +23,20 @@ jobs:
       - run: uv run ruff check expenses_tracker/
       - run: uv run ruff format --check expenses_tracker/
 
-  type-check:
-    name: Type Check (mypy)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libsqlcipher-dev
-      - uses: astral-sh/setup-uv@v5
-        with:
-          python-version: "3.12"
-      - run: uv sync
-      - run: uv run mypy expenses_tracker/
+    type-check:
+      name: Type Check (mypy)
+      runs-on: ubuntu-latest
+      steps:
+        - uses: actions/checkout@v4
+        - name: Install system dependencies
+          run: |
+            sudo apt-get update
+            sudo apt-get install -y libsqlcipher-dev
+        - uses: astral-sh/setup-uv@v5
+          with:
+            python-version: "3.12"
+        - run: uv sync --group dev
+        - run: uv run mypy expenses_tracker/
 
   test:
     name: Test Python ${{ matrix.python-version }}
