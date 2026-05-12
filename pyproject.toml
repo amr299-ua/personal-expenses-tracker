@@ -4,10 +4,10 @@ build-backend = "hatchling.build"
 
 [project]
 name = "personal-expenses-tracker"
-version = "0.1.0"
+version = "1.0.0"
 description = "Personal Expenses Tracker - Desktop and CLI application"
 readme = "README.md"
-license = { text = "MIT" }
+license = "Apache-2.0"
 requires-python = ">=3.10"
 dependencies = [
     "alembic>=1.13",
@@ -21,7 +21,6 @@ dependencies = [
     "openpyxl>=3.1",
     "plotly>=6.0",
     "pydantic>=2.0",
-    "pysqlcipher3>=1.2",
     "python-bidi>=0.4",
     "pyyaml>=6.0",
     "reportlab>=4.1",
@@ -39,6 +38,13 @@ dev = [
     "mypy>=1.11",
     "pre-commit>=3.8",
     "hypothesis>=6.112",
+    "mkdocs>=1.6",
+    "mkdocs-material>=9.5",
+    "pyinstaller>=6.10",
+]
+
+encryption = [
+    "pysqlcipher3>=1.2",
 ]
 
 [project.scripts]
