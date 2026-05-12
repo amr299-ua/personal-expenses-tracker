@@ -1,0 +1,66 @@
+site_name: Personal Expenses Tracker
+site_description: Desktop and CLI application to track personal income and expenses
+repo_url: https://github.com/amr299-ua/personal-expenses-tracker
+repo_name: personal-expenses-tracker
+edit_uri: ""
+
+theme:
+  name: material
+  language: en
+  palette:
+    - scheme: default
+      primary: teal
+      accent: teal
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - scheme: slate
+      primary: teal
+      accent: teal
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.instant
+    - navigation.tracking
+    - navigation.expand
+    - navigation.indexes
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+
+nav:
+  - Home: index.md
+  - Installation: installation.md
+  - User Guide:
+      - Quick Start: usage.md
+      - GUI: gui.md
+      - CLI: cli.md
+      - Charts: charts.md
+      - Export: export.md
+  - Security: security.md
+  - Development:
+      - Architecture: architecture.md
+      - Testing: testing.md
+      - Contributing: contributing.md
+  - Changelog: ../CHANGELOG.md
+
+markdown_extensions:
+  - admonition
+  - codehilite
+  - footnotes
+  - toc:
+      permalink: true
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+
+plugins:
+  - search
+
+extra:
+  version: "1.0.0"

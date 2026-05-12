@@ -1,222 +1,266 @@
 # Personal Expenses Tracker
 
-Aplicacion de escritorio y linea de comandos para registrar ingresos y gastos personales, con almacenamiento local en SQLite, graficas PNG y exportacion a CSV/Excel/PDF.
+Desktop and CLI application to track personal income and expenses, with local SQLite storage
+(optionally encrypted with SQLCipher), interactive charts, multi-format export, and cloud sync.
 
-## Tabla de contenido
+## Table of contents
 
-- [Resumen](#resumen)
-- [Caracteristicas](#caracteristicas)
-- [Stack tecnico](#stack-tecnico)
-- [Estructura del proyecto](#estructura-del-proyecto)
-- [Requisitos](#requisitos)
-- [Instalacion](#instalacion)
-- [Uso rapido](#uso-rapido)
-- [Referencia CLI](#referencia-cli)
-- [Archivos generados](#archivos-generados)
-- [Build de ejecutables](#build-de-ejecutables)
-- [Estado del proyecto](#estado-del-proyecto)
-- [Licencia](#licencia)
-- [Contribucion](#contribucion)
+- [Features](#features)
+- [Tech stack](#tech-stack)
+- [Project structure](#project-structure)
+- [Requirements](#requirements)
+- [Installation](#installation)
+- [Quick start](#quick-start)
+- [CLI reference](#cli-reference)
+- [Security](#security)
+- [Building executables](#building-executables)
+- [Testing](#testing)
+- [License](#license)
 
-## Resumen
+## Features
 
-Este proyecto permite:
+### GUI (Tkinter + ttkbootstrap)
+- 4 tabs: Register, Transactions, Statistics, Budgets
+- Light/dark theme with 3 color palettes (default, colorblind, dark)
+- KPI cards: Balance, Total Income, Total Expense
+- Real-time validation with visual indicators
+- Keyboard shortcuts (`Ctrl+N`, `Ctrl+F`, `Ctrl+S`, `F5`, `Ctrl+G`, `Ctrl+E`, `Ctrl+1-4`)
+- Visual calendar date picker
+- Pagination (50 rows per page) and column sorting
 
-- Registrar movimientos (ingresos y gastos).
-- Consultar balance global y estadisticas por categoria/mes.
-- Visualizar datos con varias graficas.
-- Exportar reportes listos para compartir.
+### Transactions
+- Full CRUD with double-click to edit
+- Soft-delete with restore and permanent purge
+- Live filters: text search, type, category, date range, tags
+- Quick date presets: Today, This Week, This Month, This Year, All
+- Multi-currency support with automatic exchange rates (frankfurter.app API)
+- Recurring transactions: daily, weekly, monthly, yearly
+- Smart auto-categorization based on previous descriptions
 
-La aplicacion abre la GUI por defecto. El modo CLI se activa con el flag especial `--cli`.
+### Budgets
+- Monthly planning per category
+- Budget vs. Actual comparison with visual indicators (OK/Warning/Over)
+- Color-coded progress bars
 
-## Caracteristicas
+### Charts (8 types)
+- Category bars, Monthly evolution line, Distribution pie
+- Monthly scatter, 3D bars, Forecast (linear regression)
+- Sankey diagram (income → expense flow), Budget comparison
+- Interactive: scroll-to-zoom, hover tooltips
+- Embedded in GUI and exportable to PNG
 
-- GUI en Tkinter con tres secciones: registro, movimientos y estadisticas.
-- Alta y edicion de movimientos desde la interfaz, con doble clic para cargar un movimiento en el formulario.
-- Categorias predefinidas y categorias personalizadas escritas por el usuario.
-- Filtros en vivo por texto, tipo, categoria y rango de fechas.
-- Ordenamiento por columnas en tabla de movimientos.
-- Persistencia de preferencias de interfaz en `data/ui_state.json` (tema, filtros y orden).
-- Soporte multilenguaje en GUI y CLI (`--lang` y `--list-languages`).
-- Atajos de fecha: hoy, semana, mes, ano y todo.
-- Selector de fecha con calendario visual.
-- Graficas con matplotlib:
-	- Barras por categoria.
-	- Evolucion mensual (linea).
-	- Distribucion de ingresos/gastos (pastel).
-	- Puntos mensuales con linea de balance.
-	- Barras 3D por mes.
-- Exportacion a CSV (`.csv`), Excel (`.xlsx`) y PDF (`.pdf`) con:
-	- Portada.
-	- KPI principales.
-	- Resumen ejecutivo.
-	- Tablas paginadas por categoria, mes y movimientos.
+### Export (7 formats)
+- CSV, Excel (.xlsx with 3 sheets)
+- PDF (premium cover + KPI dashboard + trend analysis + 7 charts + paginated tables)
+- JSON, YAML, interactive HTML (Plotly), consolidated monthly PDF
+- Smart export based on active filters
+- Quick export (all formats for latest month)
 
-## Stack tecnico
+### Import
+- CSV, Excel (.xlsx), JSON with auto-detection
+- Automatic column mapping
+- Preview before insert
 
-- Python 3.10+
-- SQLite (base local)
-- Tkinter (GUI)
-- matplotlib + numpy (graficas)
-- openpyxl (Excel)
-- reportlab (PDF)
-- PyInstaller (empaquetado)
+### Security
+- SQLCipher AES-256: database encryption at rest
+- PIN lock with PBKDF2-HMAC-SHA256 (600k iterations)
+- Exponential rate-limiting (3→5s, 4→15s, 5→30s, 6→60s, 7→permanent lockout)
+- Weak PIN rejection (rejects `0000`, `1234`, etc.)
+- Fernet encryption for backups, cloud sync, and SMTP password
+- Private file permissions (600/700 on Unix)
+- Dual audit logging: JSONL file + database table
 
-## Estructura del proyecto
+### Cloud Sync
+- Providers: WebDAV, Dropbox API v2, Google Drive API
+- Encrypted sync (Fernet) before upload
+- Conflict detection via metadata timestamp
+- Persistent encrypted credential storage across sessions
+
+### Automation
+- Background scheduler for reports, backups, and email delivery
+- Configurable: daily, weekly (pick day), monthly (pick day of month)
+- SMTP with TLS (587) / SSL (465) support, test email button
+
+### Internationalization (i18n)
+- 8 languages: English, Español, Français, Deutsch, Italiano, Português, 日本語, العربية
+- RTL support for Arabic with `arabic-reshaper` + `python-bidi`
+- Regional date and number formatting per locale
+- Hot-reload language switching without restart
+
+### CLI
+- Full parity with GUI: init-db, add, list, balance, stats, plot, export
+- `--currency` flag on add, `--budget-month` on export
+- 8 chart types and all export formats
+
+## Tech stack
+
+| Layer | Technology |
+|------|------------|
+| Language | Python 3.10+ |
+| GUI | Tkinter + ttkbootstrap |
+| ORM / DB | SQLAlchemy 2.0 + SQLite (+ optional SQLCipher) |
+| Migrations | Alembic |
+| Validation | Pydantic v2 |
+| Charts | Matplotlib + NumPy + Plotly |
+| Export | openpyxl, reportlab, PyYAML, CSV/JSON stdlib |
+| Security | cryptography (Fernet + PBKDF2), pysqlcipher3, google-auth, dropbox |
+| i18n | JSON locales + arabic-reshaper + python-bidi |
+| Automation | schedule + smtplib |
+| Testing | pytest + pytest-cov + Hypothesis + mypy (strict) + Ruff |
+| Build | PyInstaller + uv + hatchling |
+| CI/CD | GitHub Actions |
+
+## Project structure
 
 ```text
 personal-expenses-tracker/
-	expenses_tracker/
-		__main__.py        # Entrada principal (GUI por defecto / CLI con --cli)
-		gui.py             # Interfaz grafica
-		cli.py             # Comandos de consola
-		db.py              # Capa de datos SQLite
-		charts.py          # Generacion de graficas
-		exporters.py       # Exportacion CSV/Excel/PDF
-	scripts/
-		build_linux.sh
-		build_macos.sh
-		build_windows.ps1
-	data/                # Base SQLite y estado de UI
-	reports/             # Graficas y reportes generados
-	run_gui.py           # Entry point alternativo para GUI
-	requirements.txt
-	requirements-build.txt
+├── .github/workflows/ci.yml
+├── alembic/                         # Schema migrations
+├── expenses_tracker/
+│   ├── __main__.py                  # Entry point (GUI by default, CLI with --cli)
+│   ├── gui.py                       # Main window and wiring
+│   ├── cli.py                       # Console commands
+│   ├── db.py                        # Data layer (CRUD)
+│   ├── models.py                    # SQLAlchemy models (6 tables)
+│   ├── schemas.py                   # Pydantic validation
+│   ├── charts.py                    # Chart generation (8 types)
+│   ├── exporters.py                 # Export (7 formats)
+│   ├── importers.py                 # Import (CSV/Excel/JSON)
+│   ├── security.py                  # SQLCipher, PIN, Fernet, audit
+│   ├── cloud_sync.py                # WebDAV, Dropbox, Google Drive
+│   ├── automation.py                # Scheduler + email
+│   ├── i18n.py                      # Translation engine
+│   ├── di.py                        # Dependency injection container
+│   ├── theme.py                     # Theme manager (light/dark)
+│   ├── utils.py                     # Shared utilities
+│   ├── chart_panel.py               # Embedded chart panel
+│   ├── chart_viewer.py              # Chart viewer popup
+│   ├── gui_dialogs.py               # Dialogs (calendar, chart, PIN)
+│   ├── cloud_sync_dialog.py         # Cloud sync configuration dialog
+│   ├── automation_dialog.py         # Automation configuration dialog
+│   ├── logging_config.py            # Structured logging (JSON + console)
+│   ├── services/                    # Business service layer
+│   │   ├── transaction_service.py
+│   │   ├── database_service.py
+│   │   ├── export_service.py
+│   │   ├── state_service.py
+│   │   ├── category_suggestion_service.py
+│   │   └── currency_service.py
+│   ├── tabs/                        # GUI tab components
+│   │   ├── register_tab.py
+│   │   ├── transactions_tab.py
+│   │   ├── stats_tab.py
+│   │   └── budget_tab.py
+│   └── locales/                     # Translation files (8 languages)
+│       ├── en.json, es.json, fr.json, de.json, it.json, pt.json, ja.json, ar.json
+├── tests/                           # 24 test files, 300+ tests
+├── scripts/                         # Build scripts + utilities
+│   ├── build_linux.sh, build_macos.sh, build_windows.ps1
+│   ├── build_deb.sh, build_rpm.sh
+│   └── add_language.py
+├── resources/expenses-tracker.desktop
+├── pyproject.toml
+├── uv.lock
+├── run_gui.py                       # Alternative entry point for PyInstaller
+├── seed_data.py                     # Test data (500 transactions)
+└── CHANGELOG.md
 ```
 
-## Requisitos
+## Requirements
 
-- Python 3.10 o superior.
-- pip actualizado.
+- Python 3.10 or higher
+- System dependencies: `libsqlcipher-dev`, `python3-tk` (Linux)
 
-## Instalacion
+## Installation
 
 ```bash
 git clone https://github.com/amr299-ua/personal-expenses-tracker.git
 cd personal-expenses-tracker
 
+# Using uv (recommended)
+uv sync
+
+# Or using pip
 python -m venv .venv
 source .venv/bin/activate
-
-pip install --upgrade pip
 pip install -r requirements.txt
 ```
 
-## Uso rapido
+## Quick start
 
-### 1) GUI (modo recomendado)
+### GUI (default mode)
 
 ```bash
 python -m expenses_tracker
-```
-
-Alternativa equivalente:
-
-```bash
+# or
 python run_gui.py
 ```
 
-Cambiar idioma y listar idiomas disponibles:
+Change language:
 
 ```bash
 python -m expenses_tracker --lang es
 python -m expenses_tracker --list-languages
 ```
 
-### 2) CLI
+### CLI
 
 ```bash
+# Initialize database
 python -m expenses_tracker --cli init-db
 
-python -m expenses_tracker --cli --list-languages
-python -m expenses_tracker --cli --lang es balance
+# Add transactions
+python -m expenses_tracker --cli add --type income --amount 2500 --category Salary --date 2026-05-11
+python -m expenses_tracker --cli add --type expense --amount 120 --category Transport --date 2026-05-11 --currency MXN
 
-python -m expenses_tracker --cli add \
-	--type income \
-	--amount 2500 \
-	--category Salario \
-	--date 2026-04-25 \
-	--description "Pago mensual"
-
-python -m expenses_tracker --cli add \
-	--type expense \
-	--amount 120 \
-	--category Transporte \
-	--date 2026-04-25 \
-	--description "Taxi"
-
+# Query
 python -m expenses_tracker --cli list --limit 20
 python -m expenses_tracker --cli balance
 python -m expenses_tracker --cli stats
+
+# Charts and export
 python -m expenses_tracker --cli plot --type all --output-dir reports
-python -m expenses_tracker --cli export --format csv --output-dir reports
 python -m expenses_tracker --cli export --format all --output-dir reports
 ```
 
-### 3) Datos de prueba (opcional)
+### Test data
 
 ```bash
 python seed_data.py
 ```
 
-## Referencia CLI
+## CLI reference
 
-Comando base:
-
-```bash
-python -m expenses_tracker --cli [--db-path RUTA_DB] [--lang CODIGO] [--list-languages] <comando> [opciones]
+```
+python -m expenses_tracker --cli [--db-path PATH] [--lang CODE] <command> [options]
 ```
 
-Flags globales:
+| Command | Description |
+|---------|-------------|
+| `init-db` | Create tables and indexes |
+| `add` | Register transaction (`--type`, `--amount`, `--category`, `--date`, `--description`, `--currency`) |
+| `list` | List transactions (`--limit`, default 20) |
+| `balance` | Show total balance |
+| `stats` | Summary by category and month |
+| `plot` | Generate PNG charts (`--type`: bar/line/pie/scatter/bar3d/forecast/sankey/all) |
+| `export` | Export reports (`--format`: csv/excel/pdf/json/yaml/html/monthly_pdf/all, `--budget-month YYYY-MM`) |
 
-- `--lang`: selecciona idioma (`en`, `es`, `fr`, `it`, `de`, `pt`).
-- `--list-languages`: lista idiomas soportados y termina.
+## Security
 
-Comandos disponibles:
+- **Database encryption**: Optional via SQLCipher AES-256. Enable from `Tools > Encrypt Database`.
+- **PIN lock**: Configurable from `Tools > Set PIN Lock`. Protects the app at startup.
+- **Encrypted backups**: Automatic and manual backups are encrypted with Fernet.
+- **Encrypted cloud sync**: Database is encrypted before upload to any cloud provider.
+- **File permissions**: Sensitive files (`data/.appkey`, `data/.cloud_salt`, `data/.lock`) use 600 permissions.
 
-- `init-db`: crea tablas e indices en SQLite.
-- `add`: registra un movimiento.
-	- `--type`: `income` o `expense`.
-	- `--amount`: monto positivo.
-	- `--category`: categoria.
-	- `--date`: formato `YYYY-MM-DD`.
-	- `--description`: texto opcional.
-- `list`: lista movimientos recientes (`--limit`, default `20`).
-- `balance`: muestra balance total.
-- `stats`: resumen por categoria y por mes.
-- `plot`: genera graficas PNG (`--type` y `--output-dir`).
-	- `--type`: `category`, `month`, `bar`, `line`, `pie`, `scatter`, `bar3d`, `all`.
-- `export`: exporta reportes (`--format` y `--output-dir`).
-	- `--format`: `csv`, `excel`, `pdf`, `all`.
-
-## Archivos generados
-
-Por defecto, el proyecto usa estas rutas:
-
-- Base de datos: `data/expenses.db`
-- Estado GUI: `data/ui_state.json`
-- Graficas: `reports/chart_*.png`
-- Reportes: `reports/report_*.csv`, `reports/report_*.xlsx`, `reports/report_*.pdf`
-
-## Build de ejecutables
-
-Los scripts de build usan PyInstaller en modo `--windowed --onefile` sobre `run_gui.py`.
+## Building executables
 
 ### Linux
 
 ```bash
-./scripts/build_linux.sh
-```
-
-Salida esperada:
-
-- `release/expenses-tracker-linux-<arquitectura>.tar.gz`
-
-Ejemplo de ejecucion:
-
-```bash
-tar -xzf release/expenses-tracker-linux-x86_64.tar.gz -C release
-./release/expenses-tracker
+./scripts/build_linux.sh        # Standalone binary (tar.gz)
+./scripts/build_deb.sh          # .deb package
+./scripts/build_rpm.sh          # .rpm package
 ```
 
 ### macOS
@@ -225,34 +269,29 @@ tar -xzf release/expenses-tracker-linux-x86_64.tar.gz -C release
 ./scripts/build_macos.sh
 ```
 
-Salida esperada:
-
-- `release/expenses-tracker-macos-<arquitectura>.tar.gz`
-
-### Windows (PowerShell)
+### Windows
 
 ```powershell
 ./scripts/build_windows.ps1
 ```
 
-Salida esperada:
+## Testing
 
-- `release/expenses-tracker-windows-x86_64.zip`
+```bash
+# Full tests with coverage
+uv run pytest tests/ -q --cov=expenses_tracker
 
-## Estado del proyecto
+# Quick unit tests only
+uv run pytest tests/ -q -m "not slow"
 
-- Suite de tests con pytest en `tests/` (db, cli, charts, exporters, gui, i18n, security).
-- Workflow de build en GitHub Actions para generar binarios en tags `v*`.
+# Type checking
+uv run mypy expenses_tracker/
 
-## Licencia
+# Linting
+uv run ruff check expenses_tracker/
+uv run ruff format --check expenses_tracker/
+```
 
-Este proyecto se distribuye bajo la licencia Apache-2.0. Consulta [LICENSE](LICENSE).
+## License
 
-## Contribucion
-
-Sugerencias para colaborar:
-
-1. Crear un entorno virtual limpio.
-2. Mantener compatibilidad de comandos CLI existentes.
-3. Agregar pruebas para nuevas funciones en capa de datos, CLI y exportadores.
-4. Documentar cambios de comportamiento en este README.
+Apache-2.0. See [LICENSE](LICENSE).

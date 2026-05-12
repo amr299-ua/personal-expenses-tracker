@@ -2,6 +2,41 @@
 
 All notable changes to Personal Expenses Tracker are documented in this file.
 
+## [1.0.0] — 2026-05-11
+
+### Added
+- First stable release: all planned features from the improvement roadmap are now implemented
+- **Security audit**: Hardcoded salt, SMTP password encryption, PIN strength validation, rate limiting, SQLCipher key validation
+- **Import**: CSV, Excel (`.xlsx`), and JSON import with auto-detection, column mapping, and GUI file dialog
+- **Soft-delete**: Transactions are now soft-deleted (`deleted_at` timestamp) with restore and permanent purge support
+- **Recurring transactions**: `daily`/`weekly`/`monthly`/`yearly` intervals with auto-creation of next occurrences
+- **Tag filtering**: Search/filter transactions by comma-separated tags in the GUI
+- **CI/CD**: GitHub Actions with lint, type-check, and test matrix (Python 3.10/3.11/3.12) + Codecov
+- **Cloud sync persistence**: Encrypted credential storage and auto-sync flag across sessions
+- **Cloud sync conflict detection**: Metadata timestamp check before upload
+- `.deb` and `.rpm` packaging scripts with desktop entry
+- **MkDocs documentation**: Technical docs with Material theme covering architecture, usage, security, CLI, GUI, charts, export, testing, and contributing
+- **Import test suite**: 37 tests covering CSV, Excel, JSON parsers and the import pipeline
+
+### Fixed
+- `_safe_date` in importers: non-ISO date formats (`DD/MM/YYYY`, `MM/DD/YYYY`) now correctly parsed
+- SQLAlchemy 2.0 deprecated `session.query()` calls migrated to `session.execute(select())`
+- Budget deletion uses direct ID lookup instead of O(n) search
+- Matplotlib memory leak in PDF exports fixed with `plt.close()`
+- WebDAV `list_files()` returns structured metadata with graceful fallback
+- Pydantic `ValidationError` details preserved in custom `__init__`
+- Version number unified across `pyproject.toml`, `__init__.py`, and build scripts
+- License metadata corrected to Apache-2.0 in `pyproject.toml`
+- Budget chart no-op fixed in `generate_charts()` — now accepts and generates budget charts
+- CLI parity: `export --format` now includes `json`, `yaml`, `html`, `monthly_pdf`; `plot --type` includes `forecast`, `sankey`, `budget`
+- Chart Spanish aliases unified between `charts.py` and `chart_viewer.py`
+- Dead code removed from `chart_viewer.py`
+
+### Changed
+- Version bump to 1.0.0 across all files
+- `pysqlcipher3` moved to optional `encryption` dependency group (install with `pip install .[encryption]`)
+- Documentation table count corrected from 7 to 6 ORM models
+
 ## [0.2.0] — 2026-05-11
 
 ### Security
@@ -35,7 +70,7 @@ All notable changes to Personal Expenses Tracker are documented in this file.
 ## [0.1.0] — 2026-05-02
 
 ### Core
-- SQLAlchemy 2.0 ORM with 7 models: `Category`, `Transaction`, `Budget`, `ExchangeRate`, `AuditLogEntry`, `AutomationConfig`
+- SQLAlchemy 2.0 ORM with 6 models: `Category`, `Transaction`, `Budget`, `ExchangeRate`, `AuditLogEntry`, `AutomationConfig`
 - Alembic migrations with 7 revisions for schema evolution
 - Pydantic v2 validation schemas (`TransactionInput`, `CategoryInput`, `BudgetInput`, `ExchangeRateInput`)
 - Dependency injection container for service wiring
