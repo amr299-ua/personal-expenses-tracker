@@ -54,6 +54,7 @@ def generate_charts(
     kind: str = "all",
     language: str = "en",
     palette: str = "default",
+    budget_rows: list[dict[str, Any]] | None = None,
 ) -> list[Path]:
     """Generate chart images and return the list of file paths."""
     output_path = Path(output_dir)
@@ -100,9 +101,12 @@ def generate_charts(
         _plot_sankey(category_rows, sankey_file, language, colors)
         generated_files.append(sankey_file)
 
-    if "budget" in requested:
-        # budget chart is generated separately with its own data
-        pass
+    if "budget" in requested and budget_rows:
+        budget_file = generate_budget_chart(
+            budget_rows, output_dir=output_path, language=language, palette=palette
+        )
+        if budget_file:
+            generated_files.append(budget_file)
 
     return generated_files
 
@@ -121,6 +125,7 @@ def generate_all_figures(
     month_rows: list[dict[str, Any]],
     language: str = "en",
     palette: str = "default",
+    budget_rows: list[dict[str, Any]] | None = None,
 ) -> dict[str, Figure]:
     """Generate all available chart figures and return as a dict keyed by chart type."""
     colors = get_palette(palette)
@@ -136,6 +141,9 @@ def generate_all_figures(
         figures["scatter"] = month_scatter_figure(month_rows, language, colors)
         figures["bar3d"] = month_bars_3d_figure(month_rows, language, colors)
         figures["forecast"] = forecast_figure(month_rows, language, colors)
+
+    if budget_rows:
+        figures["budget"] = budget_comparison_figure(budget_rows, language, colors)
 
     return figures
 
@@ -161,7 +169,7 @@ def generate_budget_chart(
 def _resolve_chart_kinds(kind: str) -> set[str]:
     normalized = kind.strip().lower()
     mapping = {
-        "all": {"bar", "line", "pie", "scatter", "bar3d", "forecast", "sankey"},
+        "all": {"bar", "line", "pie", "scatter", "bar3d", "forecast", "sankey", "budget"},
         "category": {"bar"},
         "month": {"line"},
         "bar": {"bar"},

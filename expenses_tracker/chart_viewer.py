@@ -173,6 +173,12 @@ class ChartViewerDialog(tk.Toplevel):
             "forecast": {"forecast"},
             "sankey": {"sankey"},
             "budget": {"budget"},
+            "barras": {"bar"},
+            "lineas": {"line"},
+            "pastel": {"pie"},
+            "queso": {"pie"},
+            "puntos": {"scatter"},
+            "3d": {"bar3d"},
         }
         return mapping.get(normalized, {normalized}) if normalized in mapping else set()
 
@@ -204,12 +210,6 @@ class ChartViewerDialog(tk.Toplevel):
         label.pack()
 
         categories = [str(t.get_text()) for t in axis.get_xticklabels()]
-        # Approximate values from patches
-        income_vals: list[float] = []
-        expense_vals: list[float] = []
-        for patch in axis.patches:
-            # We don't know which is income/expense; just show height
-            pass
 
         def on_motion(event):
             if event.inaxes != axis:

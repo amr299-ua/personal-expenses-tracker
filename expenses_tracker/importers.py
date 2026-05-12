@@ -28,10 +28,18 @@ def _safe_date(value: Any) -> date | None:
     raw = str(value).strip()
     if not raw:
         return None
-    for _fmt in ("%Y-%m-%d", "%d/%m/%Y", "%m/%d/%Y", "%d-%m-%Y", "%Y/%m/%d"):
+    # Strip time portion if present
+    clean = raw.split("T")[0].split(" ")[0]
+    # Try ISO format first (fast path)
+    try:
+        return date.fromisoformat(clean)
+    except ValueError:
+        pass
+    # Try common non-ISO formats
+    from datetime import datetime
+    for fmt in ("%d/%m/%Y", "%m/%d/%Y", "%d-%m-%Y", "%Y/%m/%d"):
         try:
-            dt = raw.split("T")[0].split(" ")[0]
-            return date.fromisoformat(dt)
+            return datetime.strptime(clean, fmt).date()
         except ValueError:
             continue
     return None
@@ -176,7 +184,7 @@ def import_transactions(filepath: str | Path) -> list[dict[str, Any]]:
     suffix = path.suffix.lower()
     if suffix == ".csv":
         return parse_csv(path)
-    elif suffix in {".xlsx", ".xls"}:
+    elif suffix in {".xlsx", ".xls", ".xlsm"}:
         return parse_excel(path)
     elif suffix == ".json":
         return parse_json(path)

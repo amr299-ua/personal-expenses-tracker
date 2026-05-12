@@ -15,7 +15,7 @@ from tests.conftest import CATEGORY_ROWS, MONTH_ROWS
 class TestResolveChartKinds:
     def test_all_returns_all_kinds(self):
         kinds = _resolve_chart_kinds("all")
-        assert kinds == {"bar", "line", "pie", "scatter", "bar3d", "forecast", "sankey"}
+        assert kinds == {"bar", "line", "pie", "scatter", "bar3d", "forecast", "sankey", "budget"}
 
     def test_category_alias_returns_bar(self):
         assert _resolve_chart_kinds("category") == {"bar"}
