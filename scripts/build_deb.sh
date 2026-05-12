@@ -4,7 +4,7 @@
 set -euo pipefail
 
 APP_NAME="expenses-tracker"
-VERSION="0.2.0"
+VERSION="1.0.0"
 ARCH="amd64"
 MAINTAINER="Personal Expenses Tracker Team"
 DESCRIPTION="Personal Expenses Tracker - Desktop application to track income and expenses"
@@ -16,9 +16,20 @@ RELEASE_DIR="$PROJECT_DIR/release"
 DEB_ROOT="$PROJECT_DIR/build/deb"
 DEB_NAME="${APP_NAME}_${VERSION}_${ARCH}"
 
-echo "==> Building PyInstaller binary..."
+echo "==> Syncing dependencies..."
 cd "$PROJECT_DIR"
-python -m PyInstaller expenses-tracker.spec --clean --noconfirm
+uv sync --group dev
+
+echo "==> Building PyInstaller binary (onedir)..."
+rm -rf build dist
+uv run python -m PyInstaller \
+  --noconfirm \
+  --clean \
+  --windowed \
+  --name "$APP_NAME" \
+  --hidden-import PIL._tkinter_finder \
+  --add-data expenses_tracker/locales:expenses_tracker/locales \
+  run_gui.py
 
 echo "==> Preparing .deb directory structure..."
 rm -rf "$DEB_ROOT"
@@ -28,13 +39,9 @@ mkdir -p "$DEB_ROOT/usr/share/applications"
 mkdir -p "$DEB_ROOT/usr/share/icons/hicolor/256x256/apps"
 mkdir -p "$DEB_ROOT/usr/share/doc/$APP_NAME"
 
-# Copy binary
 cp "$DIST_DIR/$APP_NAME/$APP_NAME" "$DEB_ROOT/usr/bin/"
-
-# Copy desktop file
 cp "$PROJECT_DIR/resources/$APP_NAME.desktop" "$DEB_ROOT/usr/share/applications/"
 
-# Create copyright
 cat > "$DEB_ROOT/usr/share/doc/$APP_NAME/copyright" << 'EOF'
 Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
 Upstream-Name: personal-expenses-tracker
@@ -42,10 +49,9 @@ Source: https://github.com/user/personal-expenses-tracker
 
 Files: *
 Copyright: 2026 Personal Expenses Tracker Team
-License: MIT
+License: Apache-2.0
 EOF
 
-# Create control file
 cat > "$DEB_ROOT/DEBIAN/control" << EOF
 Package: $APP_NAME
 Version: $VERSION
@@ -61,7 +67,6 @@ Description: $DESCRIPTION
  Supports multiple currencies, budgets, charts, and cloud sync.
 EOF
 
-# Create changelog
 cat > "$DEB_ROOT/usr/share/doc/$APP_NAME/changelog" << EOF
 $APP_NAME ($VERSION) unstable; urgency=medium
 

@@ -4,7 +4,7 @@
 set -euo pipefail
 
 APP_NAME="expenses-tracker"
-VERSION="0.2.0"
+VERSION="1.0.0"
 RELEASE="1"
 ARCH="x86_64"
 MAINTAINER="Personal Expenses Tracker Team"

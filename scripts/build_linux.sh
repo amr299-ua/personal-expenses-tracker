@@ -2,15 +2,16 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-PYTHON_BIN="${PYTHON_BIN:-python3}"
 
 cd "$ROOT_DIR"
 
-"$PYTHON_BIN" -m pip install --upgrade pip
-"$PYTHON_BIN" -m pip install -r requirements-build.txt
+echo "==> Syncing dependencies..."
+uv sync --group dev
 
+echo "==> Building standalone binary..."
 rm -rf build dist release
-"$PYTHON_BIN" -m PyInstaller \
+
+uv run python -m PyInstaller \
   --noconfirm \
   --clean \
   --windowed \
