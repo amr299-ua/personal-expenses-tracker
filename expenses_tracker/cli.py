@@ -65,7 +65,7 @@ def _build_parser(language: str) -> argparse.ArgumentParser:
     plot_parser.add_argument(
         "--type",
         dest="plot_type",
-        choices=["category", "month", "bar", "line", "pie", "scatter", "bar3d", "all"],
+        choices=["category", "month", "bar", "line", "pie", "scatter", "bar3d", "forecast", "sankey", "budget", "all"],
         default="all",
         help=tr(language, "arg_plot_type"),
     )
@@ -74,12 +74,17 @@ def _build_parser(language: str) -> argparse.ArgumentParser:
         default="reports",
         help=tr(language, "arg_output_dir"),
     )
+    plot_parser.add_argument(
+        "--budget-month",
+        default=None,
+        help="Include budget comparison for a specific month (YYYY-MM)",
+    )
 
     export_parser = subparsers.add_parser("export", help=tr(language, "cmd_export"))
     export_parser.add_argument(
         "--format",
         dest="export_format",
-        choices=["excel", "csv", "pdf", "all"],
+        choices=["excel", "csv", "pdf", "json", "yaml", "html", "monthly_pdf", "all"],
         default="all",
         help=tr(language, "arg_export_format"),
     )
@@ -180,7 +185,7 @@ def main() -> int:
 
     if args.command == "plot":
         database.initialize()
-        _generate_plots(database, args.plot_type, args.output_dir, language)
+        _generate_plots(database, args.plot_type, args.output_dir, language, getattr(args, "budget_month", None))
         return 0
 
     if args.command == "export":
@@ -240,7 +245,13 @@ def _print_month_stats(rows: list[dict[str, Any]], language: str) -> None:
         print(tr(language, "stats_month_row", **row))
 
 
-def _generate_plots(database: ExpenseDatabase, plot_type: str, output_dir: str, language: str) -> None:
+def _generate_plots(
+    database: ExpenseDatabase,
+    plot_type: str,
+    output_dir: str,
+    language: str,
+    budget_month: str | None = None,
+) -> None:
     category_rows = database.get_totals_by_category()
     month_rows = database.get_totals_by_month()
 
@@ -248,12 +259,19 @@ def _generate_plots(database: ExpenseDatabase, plot_type: str, output_dir: str, 
         print(tr(language, "no_chart_data"))
         return
 
+    budget_rows: list[dict[str, Any]] | None = None
+    if budget_month:
+        budget_rows = database.get_budget_vs_actual(budget_month)
+        if not budget_rows:
+            budget_rows = None
+
     generated_files = generate_charts(
         category_rows=category_rows,
         month_rows=month_rows,
         output_dir=output_dir,
         kind=plot_type,
         language=language,
+        budget_rows=budget_rows,
     )
 
     if not generated_files:
